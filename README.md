@@ -39,10 +39,10 @@ export CUDA_DEVICE=0
 
 # run a test task (libero_object_swap task 2, seed 0, with perception enabled), using an anthropic "claude-opus-4-7" model and a max token limit of 8192.
 # alternatively, you can specify openai-compatible models using --cerebrum openai_compat --model xxx.
-python physical_agent/apps/libero/runner.py --suite libero_object_swap --task 2 --seed 0 --perception --cerebrum anthropic --model claude-opus-4-7 --max_tokens 8192
+python physical_agent/apps/runner.py --suite libero_object_swap --task 2 --seed 0 --perception --cerebrum anthropic --model claude-opus-4-7 --max_tokens 8192
 
 # run 8 parallel evaluation on libero_object_swap tasks 0-2, with perception enabled, on four cuda devices, using an openai-compatible "deepseek-v4-pro" model and a max token limit of 8192.
-python physical_agent/apps/libero/parallel_launch.py \
+python physical_agent/apps/parallel_launch.py \
     --suite libero_object_swap --task 2 \
     --seeds 0 1 2 3 4 5 6 7 \
     --cuda_devices 0 1 2 3 \

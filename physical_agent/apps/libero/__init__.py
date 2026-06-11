@@ -1,1 +1,1 @@
-"""LIBERO application entrypoints."""
+"""LIBERO-specific application entrypoints (baselines)."""

@@ -1,1 +1,1 @@
-"""Application entrypoints for bundled experiments."""
+"""Application entrypoints for embodied agent experiments."""

@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 
 # Auto-detect project paths: this file is at
-# <repo>/physical_agent/apps/libero/runner.py
+# <repo>/physical_agent/apps/runner.py
 from physical_agent.utils.config import (
     get_anthropic_api_key,
     get_anthropic_base_url,
