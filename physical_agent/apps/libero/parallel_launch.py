@@ -43,7 +43,7 @@ import sys
 import time
 from pathlib import Path
 
-from physical_agent.config import (
+from physical_agent.utils.config import (
     get_anthropic_api_key,
     get_anthropic_base_url,
     get_openai_compat_api_key,

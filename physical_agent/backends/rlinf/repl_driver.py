@@ -34,7 +34,7 @@ from pathlib import Path
 os.environ.setdefault("MUJOCO_GL", "egl")
 os.environ.setdefault("PYOPENGL_PLATFORM", "egl")
 
-from physical_agent.config import get_default_workdir_prefix, get_repo_root
+from physical_agent.utils.config import get_default_workdir_prefix, get_repo_root
 from physical_agent.backends import add_external_rlinf_to_path
 
 PHYSICALAGENT_ROOT = get_repo_root()

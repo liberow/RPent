@@ -6,7 +6,7 @@ import os
 import sys
 from pathlib import Path
 
-from physical_agent.config import get_repo_root, get_rlinf_repo_path
+from physical_agent.utils.config import get_repo_root, get_rlinf_repo_path
 
 
 def add_external_rlinf_to_path(project_root: Path | None = None) -> Path:

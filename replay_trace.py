@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from physical_agent.config import get_default_workdir_prefix
+from physical_agent.utils.config import get_default_workdir_prefix
 
 
 def _fmt(value: Any, digits: int = 4) -> str:

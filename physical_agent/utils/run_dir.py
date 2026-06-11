@@ -9,7 +9,7 @@ from __future__ import annotations
 import datetime
 from pathlib import Path
 
-from physical_agent.config import get_repo_root, get_logs_dir
+from physical_agent.utils.config import get_repo_root, get_logs_dir
 
 
 def make_log_dir(

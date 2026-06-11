@@ -21,7 +21,7 @@ import imageio.v2 as imageio
 import torch
 
 from physical_agent.backends import add_external_rlinf_to_path
-from physical_agent.config import get_pi05_checkpoint_path, get_repo_root
+from physical_agent.utils.config import get_pi05_checkpoint_path, get_repo_root
 
 PHYSICALAGENT_ROOT = get_repo_root()
 add_external_rlinf_to_path(PHYSICALAGENT_ROOT)

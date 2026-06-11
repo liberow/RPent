@@ -22,7 +22,7 @@ from pathlib import Path
 
 # Auto-detect project paths: this file is at
 # <repo>/physical_agent/apps/libero/runner.py
-from physical_agent.config import (
+from physical_agent.utils.config import (
     get_anthropic_api_key,
     get_anthropic_base_url,
     get_anthropic_model,
@@ -54,7 +54,7 @@ from physical_agent.context.libero_prompts import (  # noqa: E402
     SYSTEM_PROMPT,
     format_claude_code_prompt,
 )
-from physical_agent.logging import make_log_dir  # noqa: E402
+from physical_agent.utils import make_log_dir  # noqa: E402
 from physical_agent.tools.repl import (  # noqa: E402
     execute_tool,
     get_tools_spec,

@@ -26,7 +26,7 @@ from typing import Any
 os.environ.setdefault("MUJOCO_GL", "egl")
 os.environ.setdefault("PYOPENGL_PLATFORM", "egl")
 
-from physical_agent.config import get_repo_root, get_pi05_checkpoint_path
+from physical_agent.utils.config import get_repo_root, get_pi05_checkpoint_path
 from physical_agent.backends import add_external_rlinf_to_path
 
 PHYSICALAGENT_ROOT = get_repo_root()

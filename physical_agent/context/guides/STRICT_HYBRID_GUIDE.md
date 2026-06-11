@@ -255,7 +255,7 @@ freely `reset` to retry the same task.
 ```bash
 cd ${PHYSICALAGENT_REPO_ROOT:-$(pwd)}
 REPL_WORKDIR="${PHYSICALAGENT_WORKDIR_PREFIX:-$(python - <<'PY'
-from physical_agent.config import get_default_workdir_prefix
+from physical_agent.utils.config import get_default_workdir_prefix
 print(get_default_workdir_prefix())
 PY
 )}"

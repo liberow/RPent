@@ -12,7 +12,7 @@ import os
 import time
 from pathlib import Path
 
-from physical_agent.config import get_repo_root, get_default_workdir_prefix
+from physical_agent.utils.config import get_repo_root, get_default_workdir_prefix
 
 REPO_ROOT = get_repo_root()
 WORKDIR = Path(os.environ.get("HYBRID_REPL_WORKDIR", get_default_workdir_prefix()))

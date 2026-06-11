@@ -23,13 +23,13 @@ def get_repo_root() -> Path:
     env = os.environ.get("PHYSICALAGENT_REPO_ROOT")
     if env:
         return Path(env).expanduser().resolve()
-    # config.py lives at <repo>/physical_agent/config.py
-    return Path(__file__).resolve().parents[1]
+    # config.py lives at <repo>/physical_agent/utils/config.py
+    return Path(__file__).resolve().parents[2]
 
 
 def get_package_root() -> Path:
     """Return the ``physical_agent/`` package directory."""
-    return Path(__file__).resolve().parent
+    return Path(__file__).resolve().parents[1]
 
 
 # ============================================================================

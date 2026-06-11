@@ -129,7 +129,7 @@ via env: `CUDA_DEVICE=2 MODEL=claude-opus-4-7 OUTPUT_DIR=/path bash run_percepti
 ```bash
 cd ${PHYSICALAGENT_REPO_ROOT:-$(pwd)}
 REPL_WORKDIR="${PHYSICALAGENT_WORKDIR_PREFIX:-$(python - <<'PY'
-from physical_agent.config import get_default_workdir_prefix
+from physical_agent.utils.config import get_default_workdir_prefix
 print(get_default_workdir_prefix())
 PY
 )}"
