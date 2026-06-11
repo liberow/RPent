@@ -19,9 +19,10 @@ bash requirements/install.sh embodied --env libero --model openpi --use-mirror -
 cd ..
 source .venv-opi-libero/bin/activate
 ```
-3. install libero-pro and libero-plus on top of the above venv.
+3. install additional physicalagent dependencies on top of the above venv.
 ```bash
 cd physicalagent
+uv sync --active --inexact
 bash install_libero_pro_plus.sh
 ```
 4. Try the run: 
@@ -39,4 +40,13 @@ export CUDA_DEVICE=0
 # run a test task (libero_object_swap task 2, seed 0, with perception enabled), using an anthropic "claude-opus-4-7" model and a max token limit of 8192.
 # alternatively, you can specify openai-compatible models using --cerebrum openai_compat --model xxx.
 python physicalagent/apps/libero/runner.py --suite libero_object_swap --task 2 --seed 0 --perception --cerebrum anthropic --model claude-opus-4-7 --max_tokens 8192
+
+# run 8 parallel evaluation on libero_object_swap tasks 0-2, with perception enabled, on four cuda devices, using an openai-compatible "deepseek-v4-pro" model and a max token limit of 8192.
+python physicalagent/apps/libero/parallel_launch.py \
+    --suite libero_object_swap --task 2 \
+    --seeds 0 1 2 3 4 5 6 7 \
+    --cuda_devices 0 1 2 3 \
+    --cerebrum openai_compat --model deepseek-v4-pro \
+    --max_tokens 8192 --perception \
+    --output_dir logs/multi
 ```

@@ -11,9 +11,9 @@ readme = {file = "README.md", content-type = "text/markdown"}
 requires-python = ">=3.10,<=3.11.14"
 license = {file = "LICENSE"}
 keywords = [
-    "reinforcement-learning",
     "embodied-intelligence",
     "large-language-models",
+    "agent-framework",
 ]
 classifiers = [
     #   2 - Pre-Alpha
@@ -26,7 +26,6 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
 ]
-
 
 dependencies = [
     "anthropic>=0.39.0",
@@ -42,7 +41,7 @@ Documentation = "https://github.com/RLinf/PhysicalAgent"
 
 [project.optional-dependencies]
 rlinf = [
-    "rlinf @ git+https://github.com/RLinf/RLinf.git",
+    "rlinf @ git+https://github.com/jx-qiu/RLinf.git@feature/physicalagent",
 ]
 
 [tool.setuptools]
