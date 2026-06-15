@@ -6,7 +6,6 @@ of computing ``Path(__file__).resolve().parents[N]`` ad-hoc.
 from __future__ import annotations
 
 import os
-import tempfile
 from pathlib import Path
 
 
@@ -44,12 +43,12 @@ def get_guides_dir() -> Path:
     return get_repo_root() / "physical_agent" / "context" / "guides"
 
 
-def get_backends_dir() -> Path:
-    return get_repo_root() / "physical_agent" / "backends" / "rlinf"
-
-
 def get_repl_driver_script() -> Path:
-    return get_backends_dir() / "repl_driver.py"
+    return get_repo_root() / "deployment" / "rlinf" / "repl_driver.py"
+
+
+def get_vla_server_script() -> Path:
+    return get_repo_root() / "deployment" / "rlinf" / "vla_server.py"
 
 
 def get_logs_dir() -> Path:
@@ -74,12 +73,6 @@ def get_rlinf_repo_path() -> Path | None:
     if env:
         return Path(env).expanduser().resolve()
     return None
-
-
-def get_default_workdir_prefix() -> str:
-    """Default prefix for REPL working directories."""
-    default = Path(tempfile.gettempdir()) / "physical_agent_repl"
-    return os.environ.get("PHYSICALAGENT_WORKDIR_PREFIX", str(default))
 
 
 # ============================================================================

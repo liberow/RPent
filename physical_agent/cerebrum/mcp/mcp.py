@@ -16,7 +16,8 @@ from pathlib import Path
 from typing import Any
 
 from physical_agent.driver_client import SocketDriverClient
-from physical_agent.tools import frontend
+from physical_agent.driver_client.vla_client import VLAClient
+from physical_agent import tools as agent_tools
 
 SERVER_NAME = "physical_agent"
 PROTOCOL_VERSION = "2025-06-18"
@@ -24,7 +25,7 @@ PROTOCOL_VERSION = "2025-06-18"
 
 def _tool_specs() -> list[dict[str, Any]]:
     tools = []
-    for tool in frontend.get_tools_spec():
+    for tool in agent_tools.get_tools_spec():
         tools.append(
             {
                 "name": tool["name"],
@@ -143,7 +144,7 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
                 -32602,
                 "tools/call arguments must be an object",
             )
-        result = frontend.execute_tool(name, arguments)
+        result = agent_tools.execute_tool(name, arguments)
         return _response(request, _tool_result_to_mcp(result))
 
     if method in {"notifications/initialized", "$/cancelRequest"}:
@@ -175,29 +176,31 @@ def serve() -> int:
 def main(argv: list[str] | None = None) -> int:
     """Parse CLI arguments and serve the PhysicalAgent MCP tools."""
     ap = argparse.ArgumentParser(description="PhysicalAgent MCP server")
-    ap.add_argument("--workdir", required=True, help="driver workdir")
+    ap.add_argument("--output-dir", required=True, help="per-run output directory")
     ap.add_argument("--repo-root", default="", help="repository root")
-    ap.add_argument(
-        "--transport",
-        default="file",
-        choices=["file", "socket"],
-        help="driver transport used by MCP tools",
-    )
-    ap.add_argument("--transport-host", default="127.0.0.1", help="socket host")
-    ap.add_argument("--transport-port", type=int, default=0, help="socket port")
+    ap.add_argument("--transport-host", required=True, help="driver socket host")
+    ap.add_argument("--transport-port", type=int, required=True, help="driver socket port")
+    ap.add_argument("--vla-endpoint", required=True,
+                    help="Pi0.5 /predict server (e.g. http://localhost:8000)")
+    ap.add_argument("--hide-object-coords", action="store_true",
+                    help="redact GT object world poses from dumped state")
+    ap.add_argument("--video-path", default="",
+                    help="destination for the episode video (empty = no recording)")
     args = ap.parse_args(argv)
 
     if args.repo_root:
         os.chdir(args.repo_root)
         if str(Path(args.repo_root)) not in sys.path:
             sys.path.insert(0, str(Path(args.repo_root)))
-    frontend.set_workdir(args.workdir)
-    if args.transport == "socket":
-        if args.transport_port <= 0:
-            raise ValueError("--transport socket requires --transport-port")
-        frontend.set_driver_client(
-            SocketDriverClient(args.transport_host, args.transport_port)
-        )
+    agent_tools.set_output_dir(args.output_dir)
+    if args.transport_port <= 0:
+        raise ValueError("--transport-port must be > 0")
+    agent_tools.set_driver_client(
+        SocketDriverClient(args.transport_host, args.transport_port),
+        model=VLAClient(args.vla_endpoint),
+        hide_object_coords=args.hide_object_coords,
+        video_path=args.video_path or None,
+    )
     return serve()
 
 

@@ -2,7 +2,7 @@
 
 Used by ``LiberoPrimitiveDriver`` in place of an in-process openpi model.
 The server lifecycle is the caller's responsibility: bring up
-``physical_agent.backends.rlinf.vla_server`` (or any compatible ``/predict``
+``deployment/rlinf/vla_server.py`` (or any compatible ``/predict``
 implementation) before constructing this client.
 
 Wire format (see also ``vla_server.py``):

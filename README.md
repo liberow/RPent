@@ -50,3 +50,5 @@ python physical_agent/apps/parallel_launch.py \
     --max_tokens 8192 --perception \
     --output_dir logs/multi
 ```
+
+## Adding new environments to Physical Agent

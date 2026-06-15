@@ -2,9 +2,10 @@
 
 Each cell gets:
   - its own CUDA device (--cuda_device passed through)
-    - its own workdir (<output_dir>/hybrid_repl_<tag> by default)
-  - its own log file
-  - its own transcript / recipe / audit in --output_dir
+  - its own output dir (<output_dir>/<tag>/) holding everything for the
+    run: driver artifacts (images/, depths/, states.json, episode.mp4)
+    plus the agent's transcript / recipe / audit / run.log
+  - its own subprocess stdout/stderr capture file in --log_dir
 
 Usage:
     export ANTHROPIC_API_KEY=sk-...
@@ -84,7 +85,6 @@ def _runner_cmd(
     task: int,
     seed: int,
     cuda_device: str,
-    workdir: str,
     model: str | None,
     max_turns: int,
     max_tokens: int,
@@ -108,7 +108,6 @@ def _runner_cmd(
         "--task", str(task),
         "--seed", str(seed),
         "--cuda_device", str(cuda_device),
-        "--workdir", workdir,
         "--max_turns", str(max_turns),
         "--max_tokens", str(max_tokens),
         "--max_episode_steps", str(max_episode_steps),
@@ -155,15 +154,13 @@ def main() -> int:
     ap.add_argument("--max_turns", type=int, default=40)
     ap.add_argument("--max_tokens", type=int, default=4096)
     ap.add_argument("--max_episode_steps", type=int, default=600)
-    ap.add_argument("--output_dir", required=True)
+    ap.add_argument("--output_dir", required=True,
+                    help="Parent directory; each cell writes to <output_dir>/<tag>/.")
     ap.add_argument("--log_dir", default="/tmp")
     ap.add_argument("--api_key", default=None,
                     help="defaults to the selected backend's API key env var")
     ap.add_argument("--base_url", default=None,
                     help="defaults to the selected backend's base URL env var")
-    ap.add_argument("--workdir_root", default=None,
-                    help="Each cell gets a fresh <root>/hybrid_repl_<tag>/ directory. "
-                         "Default: <output_dir>, or PHYSICALAGENT_WORKDIR_PREFIX.")
     ap.add_argument("--stagger_s", type=float, default=20.0,
                     help="Seconds to wait between launching successive agents "
                          "(helps avoid hammering the API + spreads Pi0 load IO).")
@@ -172,7 +169,8 @@ def main() -> int:
     ap.add_argument("--libero_type", default=None, choices=["standard", "pro", "plus"],
                     help="LIBERO variant to pass through. Default is runner.py auto-routing.")
     ap.add_argument("--skip_existing", action="store_true",
-                    help="Skip cells whose audit JSON already exists in --output_dir.")
+                    help="Skip cells whose audit JSON already exists at "
+                         "<output_dir>/<tag>/<tag>.json.")
     ap.add_argument("--claude_code_timeout_s", type=int, default=None,
                     help="Wall-clock cap for claude -p cells. Defaults in runner.py.")
     ap.add_argument("--claude_code_max_budget_usd", type=float, default=None,
@@ -223,9 +221,6 @@ def main() -> int:
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     # Initialise unified logging for this run
     init_run_logging(args.log_dir)
-    workdir_root = args.workdir_root or os.environ.get("PHYSICALAGENT_WORKDIR_PREFIX")
-    if workdir_root is None:
-        workdir_root = args.output_dir
 
     procs: list[tuple[subprocess.Popen, str, str, tuple, int]] = []
     active: list[tuple[subprocess.Popen, str, str, tuple, int]] = []
@@ -249,7 +244,8 @@ def main() -> int:
     launched = 0
     for i, (suite, task, seed) in enumerate(cells):
         tag = f"{suite.replace('libero_','')}_t{task}_s{seed}"
-        if args.skip_existing and (Path(args.output_dir) / f"{tag}.json").exists():
+        cell_output_dir = str(Path(args.output_dir) / tag)
+        if args.skip_existing and (Path(cell_output_dir) / f"{tag}.json").exists():
             logger.info("  [%d] %s  SKIP existing audit", i, tag)
             continue
         if args.dry_run:
@@ -259,17 +255,16 @@ def main() -> int:
             used_slots = {item[4] for item in active}
             slot = next((idx for idx in range(n_devices) if idx not in used_slots), 0)
         cuda = args.cuda_devices[slot]
-        workdir = str(Path(workdir_root) / f"hybrid_repl_{tag}")
         log_path = f"{args.log_dir}/agent_{tag}.log"
 
         cmd = _runner_cmd(
             suite=suite, task=task, seed=seed,
-            cuda_device=cuda, workdir=workdir,
+            cuda_device=cuda,
             model=args.model,
             max_turns=args.max_turns,
             max_tokens=args.max_tokens,
             max_episode_steps=args.max_episode_steps,
-            output_dir=args.output_dir,
+            output_dir=cell_output_dir,
             base_url=base_url,
             api_key=api_key,
             cerebrum=args.cerebrum,
@@ -282,7 +277,8 @@ def main() -> int:
             thinking=args.thinking,
         )
 
-        logger.info("  [%d] %s  GPU=%s  workdir=%s  log=%s", i, tag, cuda, workdir, log_path)
+        logger.info("  [%d] %s  GPU=%s  output_dir=%s  log=%s",
+                    i, tag, cuda, cell_output_dir, log_path)
         if args.dry_run:
             logger.info("      cmd: %s", ' '.join(cmd))
             continue
@@ -341,11 +337,11 @@ def main() -> int:
         # libero_terminated=true. This catches cases where the agent
         # crashed (e.g. API error) AFTER the sim already terminated.
         tag = r["tag"]
-        wd = Path(workdir_root) / f"hybrid_repl_{tag}"
+        cell_dir = Path(args.output_dir) / tag
         sim_ok = False
-        if wd.exists():
+        if cell_dir.exists():
             import json as _json
-            sp = wd / "states.json"
+            sp = cell_dir / "states.json"
             if sp.exists():
                 try:
                     arr = _json.load(open(sp))

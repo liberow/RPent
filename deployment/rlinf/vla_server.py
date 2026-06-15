@@ -2,7 +2,7 @@
 
 Run::
 
-    python -m physical_agent.backends.rlinf.vla_server \
+    python deployment/rlinf/vla_server.py \
         --host 0.0.0.0 --port 8000 [--model-path /path/to/pi05_libero]
 
 Endpoints:
@@ -22,6 +22,7 @@ import argparse
 import base64
 import io
 import os
+import sys
 import time
 from typing import Any
 
@@ -31,21 +32,65 @@ os.environ.setdefault("PYOPENGL_PLATFORM", "egl")
 from physical_agent.utils.config import (
     get_pi05_checkpoint_path,
     get_repo_root,
+    get_rlinf_repo_path,
 )
-from physical_agent.backends import add_external_rlinf_to_path
 
 PHYSICALAGENT_ROOT = get_repo_root()
-RLINF_REPO_PATH = add_external_rlinf_to_path(PHYSICALAGENT_ROOT)
+RLINF_REPO_PATH = get_rlinf_repo_path() or (PHYSICALAGENT_ROOT.parent / "rlinf").resolve()
+if str(RLINF_REPO_PATH) not in sys.path:
+    sys.path.insert(0, str(RLINF_REPO_PATH))
 os.environ.setdefault("ROBOT_PLATFORM", "LIBERO")
 
 import imageio.v2 as imageio  # noqa: E402
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
+from omegaconf import OmegaConf  # noqa: E402
 
-from physical_agent.backends.rlinf.primitives import build_model_cfg  # noqa: E402
 from physical_agent.utils.logging import get_logger  # noqa: E402
 
 logger = get_logger("vla_server")
+
+
+CHECKPOINT_PATH = get_pi05_checkpoint_path()
+
+
+def build_model_cfg(model_path: str | None = None) -> Any:
+    """OmegaConf for ``rlinf.models.embodiment.openpi.get_model``."""
+    model_path = model_path or CHECKPOINT_PATH
+    if not model_path:
+        raise RuntimeError(
+            "PI05_CHECKPOINT_PATH is not set; provide the Pi0.5 checkpoint "
+            "path via environment before launching the VLA server."
+        )
+    return OmegaConf.create(
+        {
+            "model_type": "openpi",
+            "model_path": model_path,
+            "precision": None,
+            "num_action_chunks": 5,
+            "action_dim": 7,
+            "is_lora": False,
+            "lora_rank": 32,
+            "use_proprio": True,
+            "num_steps": 5,
+            "add_value_head": False,
+            "openpi": {
+                "config_name": "pi05_libero",
+                "num_images_in_input": 2,
+                "noise_level": 0.5,
+                "action_chunk": 5,
+                "num_steps": 5,
+                "train_expert_only": True,
+                "action_env_dim": 7,
+                "noise_method": "flow_sde",
+                "add_value_head": False,
+                "value_after_vlm": False,
+                "value_vlm_mode": "mean_token",
+                "detach_critic_input": None,
+                "use_dsrl": False,
+            },
+        }
+    )
 
 
 # ----- model singleton ----------------------------------------------------
@@ -197,13 +242,11 @@ def spawn_local_server(
     for ``/healthz`` should use ``VLAClient.healthz()`` directly.
     """
     import subprocess
-    import sys
 
     bind_port = port if port is not None else _find_free_port()
     cmd = [
         sys.executable,
-        "-m",
-        "physical_agent.backends.rlinf.vla_server",
+        str(get_repo_root() / "deployment" / "rlinf" / "vla_server.py"),
         "--host", host,
         "--port", str(bind_port),
     ]

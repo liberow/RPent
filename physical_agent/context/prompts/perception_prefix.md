@@ -7,8 +7,9 @@ per object). You must LOCALIZE objects yourself via camera + depth:
 
   HOW TO GET AN OBJECT'S WORLD XYZ:
   1. Look at images_cam/image_cam_NN.png (calibration frame — the SECOND
-     image returned by view_driver_state / send_command). Find the target
-     object's pixel (row from top, col from left; image is 256×256).
+     image returned by view_driver_state and by every primitive tool).
+     Find the target object's pixel (row from top, col from left; image
+     is 256×256).
   2. Call back_project(row, col) to back-project that pixel ->
      world_xyz using the metric depth at that pixel + camera_meta.
   3. Sample 3-5 pixels on the object and median their xy for robustness.

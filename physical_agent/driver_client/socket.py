@@ -1,10 +1,19 @@
-"""JSON-over-TCP transport for the interactive driver."""
+"""Pickle-framed TCP transport for the env + model RPC boundary.
+
+The agent process ships ``(method, args, kwargs)`` tuples to the driver
+process and receives the method's return value. Numpy arrays, dicts of
+arrays, and other LIBERO/OpenPI payloads ride the wire as pickle frames
+(length-prefixed, one frame per request/response).
+
+Both processes are spawned by the same user on the same host, so we use
+pickle rather than a more defensive codec.
+"""
 from __future__ import annotations
 
-import base64
-import json
+import pickle
 import socket
 import socketserver
+import struct
 import threading
 import uuid
 from collections.abc import Callable
@@ -14,9 +23,43 @@ from typing import Any
 DEFAULT_CONNECT_TIMEOUT_S = 10.0
 DEFAULT_REQUEST_TIMEOUT_S = 30.0
 
+_LEN_PREFIX = struct.Struct(">I")
+
+
+def _read_exact(reader, n: int) -> bytes:
+    buf = bytearray()
+    while len(buf) < n:
+        chunk = reader.read(n - len(buf))
+        if not chunk:
+            raise ConnectionError(
+                f"socket closed mid-frame (read {len(buf)}/{n} bytes)"
+            )
+        buf.extend(chunk)
+    return bytes(buf)
+
+
+def _read_frame(reader) -> Any:
+    (length,) = _LEN_PREFIX.unpack(_read_exact(reader, _LEN_PREFIX.size))
+    return pickle.loads(_read_exact(reader, length))
+
+
+def _write_frame(writer, obj: Any) -> None:
+    body = pickle.dumps(obj, protocol=pickle.HIGHEST_PROTOCOL)
+    writer.write(_LEN_PREFIX.pack(len(body)) + body)
+    writer.flush()
+
+
+class RpcError(RuntimeError):
+    """Raised when a remote method call returns an error."""
+
+    def __init__(self, method: str, message: str, *, traceback: str | None = None):
+        super().__init__(f"{method}: {message}")
+        self.method = method
+        self.server_traceback = traceback
+
 
 class SocketDriverClient:
-    """One-request-per-connection JSON socket client."""
+    """One-request-per-connection pickle-framed RPC client."""
 
     def __init__(
         self,
@@ -29,113 +72,42 @@ class SocketDriverClient:
         self.port = int(port)
         self.connect_timeout_s = connect_timeout_s
 
-    def _request(
+    def call(
         self,
         method: str,
-        params: dict[str, Any] | None = None,
+        args: tuple = (),
+        kwargs: dict | None = None,
         *,
         timeout_s: float | None = None,
-    ) -> dict:
+    ) -> Any:
         req_id = str(uuid.uuid4())
-        payload = {"id": req_id, "method": method, "params": params or {}}
+        payload = {
+            "id": req_id,
+            "method": method,
+            "args": tuple(args),
+            "kwargs": dict(kwargs or {}),
+        }
         request_timeout_s = timeout_s or DEFAULT_REQUEST_TIMEOUT_S
-        try:
-            with socket.create_connection(
-                (self.host, self.port),
-                timeout=self.connect_timeout_s,
-            ) as sock:
-                sock.settimeout(request_timeout_s)
-                with sock.makefile("rwb") as f:
-                    f.write(json.dumps(payload).encode("utf-8") + b"\n")
-                    f.flush()
-                    line = f.readline()
-        except Exception as exc:
-            return {"error": f"socket transport error: {exc}"}
-
-        if not line:
-            return {"error": "socket transport error: empty response"}
-        try:
-            response = json.loads(line.decode("utf-8"))
-        except Exception as exc:
-            return {"error": f"socket transport error: invalid JSON response: {exc}"}
+        with socket.create_connection(
+            (self.host, self.port), timeout=self.connect_timeout_s
+        ) as sock:
+            sock.settimeout(request_timeout_s)
+            with sock.makefile("rwb") as f:
+                _write_frame(f, payload)
+                response = _read_frame(f)
+        if not isinstance(response, dict):
+            raise RpcError(method, f"bad response type: {type(response).__name__}")
         if response.get("id") != req_id:
-            return {
-                "error": (
-                    "socket transport error: response id mismatch "
-                    f"{response.get('id')} != {req_id}"
-                )
-            }
+            raise RpcError(
+                method, f"id mismatch ({response.get('id')!r} != {req_id!r})"
+            )
         if not response.get("ok"):
-            out = {"error": response.get("error", "socket transport request failed")}
-            if response.get("traceback"):
-                out["traceback"] = response["traceback"]
-            return out
-        result = response.get("result")
-        if isinstance(result, dict):
-            return result
-        return {"result": result}
-
-    def send_command(
-        self,
-        command: dict,
-        *,
-        current_step: int | None = None,
-        timeout_s: float = 600.0,
-    ) -> dict:
-        params: dict[str, Any] = {"command": command}
-        if current_step is not None:
-            params["current_step"] = int(current_step)
-        return self._request("send_command", params, timeout_s=timeout_s)
-
-    def load_states(self) -> list:
-        result = self._request("get_states")
-        states = result.get("states")
-        return states if isinstance(states, list) else []
-
-    def latest_step(self) -> int | None:
-        result = self._request("get_latest_step")
-        step = result.get("step")
-        return int(step) if step is not None else None
-
-    def load_step(self, step: int | None = None) -> dict:
-        params = {} if step is None else {"step": int(step)}
-        result = self._request("get_step", params)
-        if result.get("error"):
-            raise IndexError(result["error"])
-        entry = result.get("step_data")
-        if not isinstance(entry, dict):
-            raise ValueError("socket transport returned invalid step data")
-        return entry
-
-    def load_image(self, step: int, kind: str = "agent") -> bytes | None:
-        result = self._request("get_image", {"step": int(step), "kind": kind})
-        if result.get("error"):
-            return None
-        data = result.get("data")
-        if data is None:
-            return None
-        if not isinstance(data, str):
-            raise ValueError("socket transport returned invalid image data")
-        return base64.b64decode(data.encode("ascii"))
-
-    def load_camera_meta(self) -> dict[str, Any]:
-        result = self._request("get_camera_meta")
-        if result.get("error"):
-            raise FileNotFoundError(result["error"])
-        meta = result.get("camera_meta")
-        if not isinstance(meta, dict):
-            raise ValueError("socket transport returned invalid camera metadata")
-        return meta
-
-    def load_depth(self, step: int) -> Any:
-        import numpy as np
-
-        result = self._request("get_depth", {"step": int(step)})
-        if result.get("error"):
-            raise FileNotFoundError(result["error"])
-        if "depth" not in result:
-            raise ValueError("socket transport returned no depth data")
-        return np.array(result["depth"])
+            raise RpcError(
+                method,
+                str(response.get("error", "<no error message>")),
+                traceback=response.get("traceback"),
+            )
+        return response.get("result")
 
     def close(self) -> None:
         return None
@@ -143,29 +115,34 @@ class SocketDriverClient:
 
 class _RequestHandler(socketserver.StreamRequestHandler):
     def handle(self) -> None:
-        line = self.rfile.readline(10_000_000)
-        if not line:
+        try:
+            payload = _read_frame(self.rfile)
+        except Exception:
             return
         req_id = None
         try:
-            request = json.loads(line.decode("utf-8"))
-            req_id = request.get("id")
-            result = self.server.dispatch(request)  # type: ignore[attr-defined]
-            response = {"id": req_id, "ok": True, "result": result}
+            req_id = payload.get("id") if isinstance(payload, dict) else None
+            method = payload["method"]
+            args = payload.get("args") or ()
+            kwargs = payload.get("kwargs") or {}
+            result = self.server.dispatch(method, args, kwargs)  # type: ignore[attr-defined]
+            response: dict = {"id": req_id, "ok": True, "result": result}
         except Exception as exc:
-            import traceback
-
+            import traceback as _tb
             response = {
                 "id": req_id,
                 "ok": False,
                 "error": str(exc),
-                "traceback": traceback.format_exc(),
+                "traceback": _tb.format_exc(),
             }
-        self.wfile.write(json.dumps(response, default=str).encode("utf-8") + b"\n")
+        try:
+            _write_frame(self.wfile, response)
+        except Exception:
+            pass
 
 
 class TransportTCPServer(socketserver.ThreadingTCPServer):
-    """Small TCP server that dispatches one JSON request per connection."""
+    """TCP server that dispatches pickle-framed RPC calls."""
 
     allow_reuse_address = True
     daemon_threads = True
@@ -173,15 +150,12 @@ class TransportTCPServer(socketserver.ThreadingTCPServer):
     def __init__(
         self,
         server_address: tuple[str, int],
-        dispatch: Callable[[dict], dict],
+        dispatch: Callable[[str, tuple, dict], Any],
     ):
         super().__init__(server_address, _RequestHandler)
         self._dispatch = dispatch
         self._dispatch_lock = threading.Lock()
 
-    def dispatch(self, request: dict) -> dict:
-        method = request.get("method")
-        if method == "send_command":
-            with self._dispatch_lock:
-                return self._dispatch(request)
-        return self._dispatch(request)
+    def dispatch(self, method: str, args: tuple, kwargs: dict) -> Any:
+        with self._dispatch_lock:
+            return self._dispatch(method, args, kwargs)

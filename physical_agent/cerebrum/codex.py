@@ -1,6 +1,6 @@
 """Codex CLI cerebrum -- delegates the agent loop to ``codex exec``.
 
-Codex interacts directly with the repository and driver workdir through its
+Codex interacts directly with the repository and driver output dir through its
 normal local CLI tools.  This backend mirrors ``ClaudeCodeCerebrum``: it sends
 one self-contained task prompt to a subprocess and waits for completion.
 """
@@ -30,7 +30,7 @@ class CodexCerebrum:
     def __init__(
         self,
         *,
-        workdir: str,
+        output_dir: str,
         repo_root: str | Path | None = None,
         model: str | None = None,
         timeout_s: int = 600,
@@ -38,21 +38,25 @@ class CodexCerebrum:
         output_path: str | Path | None = None,
         driver_pid: int | None = None,
         enable_mcp: bool = True,
-        transport: str = "file",
         transport_host: str = "127.0.0.1",
         transport_port: int = 0,
+        vla_endpoint: str = "",
+        hide_object_coords: bool = False,
+        video_path: str = "",
     ):
         """Initialize the Codex CLI subprocess wrapper."""
-        self._workdir = str(workdir)
+        self._output_dir = str(output_dir)
         self._repo_root = str(repo_root) if repo_root else str(get_repo_root())
         self._model = model
         self._timeout_s = timeout_s
         self._extra_dirs = extra_dirs or []
         self._output_path = Path(output_path) if output_path else None
         self._enable_mcp = enable_mcp
-        self._transport = transport
         self._transport_host = transport_host
         self._transport_port = int(transport_port)
+        self._vla_endpoint = vla_endpoint
+        self._hide_object_coords = bool(hide_object_coords)
+        self._video_path = video_path
 
     def set_driver_pid(self, pid: int | None) -> None:
         """Compatibility no-op for the runner interface."""
@@ -64,9 +68,12 @@ class CodexCerebrum:
 
     def set_socket_endpoint(self, host: str, port: int) -> None:
         """Record the driver socket endpoint discovered after startup."""
-        self._transport = "socket"
         self._transport_host = host
         self._transport_port = int(port)
+
+    def set_vla_endpoint(self, endpoint: str) -> None:
+        """Record the vla_server HTTP endpoint discovered after startup."""
+        self._vla_endpoint = endpoint
 
     def solve(
         self,
@@ -98,7 +105,7 @@ class CodexCerebrum:
 
             model_desc = self._model if self._model else "(configured default)"
             logger.info("prompt: %d chars -> %s", len(full_prompt), prompt_file)
-            logger.info("workdir: %s", self._workdir)
+            logger.info("output_dir: %s", self._output_dir)
             logger.info(
                 "invoking codex exec --model %s (timeout=%ds)",
                 model_desc, self._timeout_s,
@@ -123,15 +130,17 @@ class CodexCerebrum:
             ]
             if self._enable_mcp:
                 cmd += _codex_mcp_config_args(
-                    workdir=self._workdir,
+                    output_dir=self._output_dir,
                     repo_root=self._repo_root,
-                    transport=self._transport,
                     transport_host=self._transport_host,
                     transport_port=self._transport_port,
+                    vla_endpoint=self._vla_endpoint,
+                    hide_object_coords=self._hide_object_coords,
+                    video_path=self._video_path,
                 )
             if self._model:
                 cmd += ["--model", self._model]
-            for d in [self._workdir, *self._extra_dirs]:
+            for d in [self._output_dir, *self._extra_dirs]:
                 cmd += ["--add-dir", d]
             cmd.append(full_prompt)
 
@@ -217,14 +226,18 @@ def _toml_value(value: Any) -> str:
 
 def _codex_mcp_config_args(
     *,
-    workdir: str,
+    output_dir: str,
     repo_root: str,
-    transport: str,
     transport_host: str,
     transport_port: int,
+    vla_endpoint: str,
+    hide_object_coords: bool,
+    video_path: str,
 ) -> list[str]:
-    if transport == "socket" and transport_port <= 0:
+    if transport_port <= 0:
         raise RuntimeError("Codex MCP socket transport requires a bound port")
+    if not vla_endpoint:
+        raise RuntimeError("Codex MCP server requires a vla_endpoint")
 
     pythonpath = repo_root
     if os.environ.get("PYTHONPATH"):
@@ -233,31 +246,32 @@ def _codex_mcp_config_args(
     server_args = [
         "-m",
         "physical_agent.cerebrum.mcp.mcp",
-        "--workdir",
-        workdir,
+        "--output-dir",
+        output_dir,
         "--repo-root",
         repo_root,
-        "--transport",
-        transport,
+        "--transport-host",
+        transport_host,
+        "--transport-port",
+        str(transport_port),
+        "--vla-endpoint",
+        vla_endpoint,
     ]
-    if transport == "socket":
-        server_args += [
-            "--transport-host",
-            transport_host,
-            "--transport-port",
-            str(transport_port),
-        ]
+    if hide_object_coords:
+        server_args.append("--hide-object-coords")
+    if video_path:
+        server_args += ["--video-path", video_path]
 
     config: list[tuple[str, Any]] = [
         ("mcp_servers.physical_agent.command", sys.executable),
         ("mcp_servers.physical_agent.args", server_args),
-        ("mcp_servers.physical_agent.env.HYBRID_DRIVER_WORKDIR", workdir),
-        ("mcp_servers.physical_agent.env.PHYSICAL_AGENT_TRANSPORT", transport),
+        ("mcp_servers.physical_agent.env.HYBRID_DRIVER_OUTPUT_DIR", output_dir),
         ("mcp_servers.physical_agent.env.PHYSICAL_AGENT_TRANSPORT_HOST", transport_host),
         (
             "mcp_servers.physical_agent.env.PHYSICAL_AGENT_TRANSPORT_PORT",
             str(transport_port),
         ),
+        ("mcp_servers.physical_agent.env.PHYSICAL_AGENT_VLA_ENDPOINT", vla_endpoint),
         ("mcp_servers.physical_agent.env.PYTHONPATH", pythonpath),
     ]
 

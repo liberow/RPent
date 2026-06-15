@@ -29,7 +29,6 @@ from physical_agent.utils.config import (
     get_anthropic_base_url,
     get_anthropic_model,
     get_cuda_device,
-    get_default_workdir_prefix,
     get_libero_type,
     get_memory_dir,
     get_openai_compat_api_key,
@@ -38,6 +37,7 @@ from physical_agent.utils.config import (
     get_openai_compat_supports_images,
     get_repl_driver_script,
     get_repo_root,
+    get_vla_server_script,
 )
 
 REPO_ROOT = get_repo_root()
@@ -63,16 +63,14 @@ from physical_agent.driver_client import (  # noqa: E402
     get_socket_endpoint,
     set_socket_endpoint,
 )
-from physical_agent.tools.frontend import (  # noqa: E402
+from physical_agent.driver_client.vla_client import VLAClient  # noqa: E402
+from physical_agent.tools import (  # noqa: E402
     execute_tool,
     get_tools_spec,
-    tool_result_to_content_blocks,
-)
-from physical_agent.tools.frontend import (  # noqa: E402
     set_driver_client as tools_set_driver_client,
-)
-from physical_agent.tools.frontend import (  # noqa: E402
-    set_workdir as tools_set_workdir,
+    set_output_dir as tools_set_output_dir,
+    stop_recording_and_save as tools_stop_recording_and_save,  # noqa: F401
+    tool_result_to_content_blocks,
 )
 from physical_agent.utils import make_log_dir  # noqa: E402
 from physical_agent.utils.logging import get_logger, init_run_logging  # noqa: E402
@@ -102,32 +100,28 @@ def start_driver(
     suite: str,
     task: int,
     seed: int,
-    workdir: str | None = None,
+    output_dir: str,
     max_episode_steps: int = 600,
     libero_type: str | None = None,
     cuda_device: str | None = None,
     log_path: str | None = None,
     driver_script: str | None = None,
     ready_timeout_s: float = 300.0,
-    perception: bool = False,
-    transport: str = "file",
     transport_host: str = "127.0.0.1",
     transport_port: int = 0,
 ) -> subprocess.Popen:
-    """Launch the interactive driver in background.
+    """Launch the env+model RPC driver in background.
 
-    The driver itself wipes its own stale outputs (states.json, images/,
-    depths/, etc.) before writing — we don't rmtree the workdir here
-    because it doubles as the run's output_dir.
-
-    Returns the Popen handle; waits until ``states.json`` exists with the
-    initial (step 0) entry.
+    The driver subprocess hosts ONLY the env and model. Primitives, video
+    recording, and state dumping run agent-side. The driver prints a
+    machine-readable ``transport_ready`` event on stdout once its RPC
+    server is listening; this function returns once that event is seen.
     """
-    wd = Path(workdir or get_default_workdir_prefix())
-    wd.mkdir(parents=True, exist_ok=True)
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     if log_path is None:
-        log_path = str(wd / "driver.log")
+        log_path = str(out_dir / "driver.log")
 
     env = os.environ.copy()
     env["LIBERO_TYPE"] = libero_type or get_libero_type()
@@ -142,84 +136,48 @@ def start_driver(
         "--task", str(task),
         "--seed", str(seed),
         "--max_episode_steps", str(max_episode_steps),
-        "--workdir", str(wd),
-        "--transport", transport,
+        "--output_dir", str(out_dir),
+        "--transport_host", transport_host,
+        "--transport_port", str(transport_port),
     ]
-    if transport == "socket":
-        cmd += [
-            "--transport_host", transport_host,
-            "--transport_port", str(transport_port),
-        ]
-    if perception:
-        cmd += ["--hide_object_coords", "--always_render"]
-        cmd += ["--video_path", str(wd / "episode.mp4")]
     logger.info("driver cmd: %s", ' '.join(cmd))
     logger.info("driver log: %s", log_path)
-    logger.info("CUDA_VISIBLE_DEVICES=%s  workdir=%s", cuda_device, wd)
+    logger.info("CUDA_VISIBLE_DEVICES=%s  output_dir=%s", cuda_device, out_dir)
     log_f = open(log_path, "w")
     ready_events: queue.Queue[dict] = queue.Queue()
-    if transport == "socket":
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            env=env,
-            cwd=str(REPO_ROOT),
-            text=True,
-            bufsize=1,
-        )
-        threading.Thread(
-            target=_pipe_driver_output,
-            args=(proc, log_f, ready_events),
-            daemon=True,
-        ).start()
-    else:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=log_f,
-            stderr=subprocess.STDOUT,
-            env=env,
-            cwd=str(REPO_ROOT),
-        )
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        env=env,
+        cwd=str(REPO_ROOT),
+        text=True,
+        bufsize=1,
+    )
+    threading.Thread(
+        target=_pipe_driver_output,
+        args=(proc, log_f, ready_events),
+        daemon=True,
+    ).start()
 
-    logger.info("waiting for states.json (Pi0 load ~80s)...")
+    logger.info("waiting for transport_ready (Pi0 load ~80s)...")
     t0 = time.time()
-
-    def _has_initial_state() -> bool:
-        sp = wd / "states.json"
-        if not sp.exists():
-            return False
+    transport_ready = False
+    while not transport_ready:
         try:
-            with open(sp) as f:
-                arr = json.load(f)
-            return isinstance(arr, list) and len(arr) >= 1 and arr[0] is not None
-        except Exception:
-            return False
-
-    transport_ready = transport != "socket"
-
-    def _capture_transport_ready() -> bool:
-        nonlocal transport_ready
-        if transport_ready:
-            return True
-        while True:
-            try:
-                event = ready_events.get_nowait()
-            except queue.Empty:
-                break
-            if event.get("kind") == "socket" and event.get("host") and event.get("port"):
-                set_socket_endpoint(wd, event["host"], int(event["port"]))
-                transport_ready = True
-                logger.info(
-                    "socket transport ready at %s:%s",
-                    event["host"],
-                    event["port"],
-                )
-                return True
-        return False
-
-    while not (_has_initial_state() and _capture_transport_ready()):
-        time.sleep(2)
+            event = ready_events.get(timeout=2.0)
+        except queue.Empty:
+            event = None
+        if event is not None and event.get("kind") == "socket" \
+                and event.get("host") and event.get("port"):
+            set_socket_endpoint(out_dir, event["host"], int(event["port"]))
+            transport_ready = True
+            logger.info(
+                "socket transport ready at %s:%s",
+                event["host"],
+                event["port"],
+            )
+            break
         if proc.poll() is not None:
             logger.error("driver EXITED before becoming ready. Last log:")
             logger.error("%s", Path(log_path).read_text()[-2000:])
@@ -233,16 +191,19 @@ def start_driver(
 
 def stop_driver(
     proc: subprocess.Popen,
-    workdir: str | None = None,
+    output_dir: str,
     timeout: float = 15.0,
-    transport: str = "file",
 ) -> None:
     if proc.poll() is not None:
         return
-    wd = Path(workdir or get_default_workdir_prefix())
+    # Agent-side: flush the episode video before the env+model process dies.
     try:
-        client = create_driver_client(transport, wd)
-        client.send_command({"action": "exit"}, timeout_s=timeout)
+        tools_stop_recording_and_save()
+    except Exception:
+        pass
+    try:
+        client = create_driver_client(output_dir)
+        client.call("shutdown", timeout_s=timeout)
     except Exception:
         pass
     try:
@@ -253,6 +214,69 @@ def stop_driver(
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             proc.kill()
+
+
+def start_vla_server(
+    *,
+    host: str = "127.0.0.1",
+    port: int = 0,
+    cuda_device: str | None = None,
+    log_path: str | None = None,
+) -> tuple[str, subprocess.Popen]:
+    """Launch the Pi0.5 VLA HTTP server in background.
+
+    Returns ``(base_url, proc)``. ``port=0`` asks the OS for a free port.
+    Caller is responsible for stopping ``proc`` via :func:`stop_vla_server`.
+    """
+    if port == 0:
+        import socket as _socket
+        with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as s:
+            s.bind((host, 0))
+            port = int(s.getsockname()[1])
+
+    env = os.environ.copy()
+    if cuda_device is not None:
+        env["CUDA_VISIBLE_DEVICES"] = str(cuda_device)
+
+    cmd = [
+        sys.executable,
+        str(get_vla_server_script()),
+        "--host", host,
+        "--port", str(port),
+    ]
+    logger.info("vla_server cmd: %s", " ".join(cmd))
+    if log_path:
+        log_f = open(log_path, "w")
+        proc = subprocess.Popen(cmd, stdout=log_f, stderr=subprocess.STDOUT, env=env)
+    else:
+        proc = subprocess.Popen(cmd, env=env)
+
+    base_url = f"http://{host}:{port}"
+    # Block until /healthz responds so callers don't race the model load.
+    client = VLAClient(base_url)
+    t0 = time.time()
+    while time.time() - t0 < 300:
+        if proc.poll() is not None:
+            raise RuntimeError("vla_server exited prematurely")
+        try:
+            if client.healthz():
+                logger.info("vla_server ready at %s after %.1fs", base_url, time.time() - t0)
+                return base_url, proc
+        except Exception:
+            pass
+        time.sleep(2.0)
+    proc.terminate()
+    raise RuntimeError("vla_server not ready after 300s")
+
+
+def stop_vla_server(proc: subprocess.Popen | None, timeout: float = 10.0) -> None:
+    if proc is None or proc.poll() is not None:
+        return
+    proc.terminate()
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
 
 
 # ---------------------------------------------------------------------------
@@ -295,15 +319,14 @@ def _sanitize_transcript_content(value):
 # ---------------------------------------------------------------------------
 
 
-def _emergency_save(workdir, output_dir, suite, task, seed, recipe_tag,
+def _emergency_save(output_dir, suite, task, seed, recipe_tag,
                     agent_error, regime="strict", verbose=True):
-    """If the workdir has libero_terminated=True in any step of
-    ``states.json`` and the output_dir is missing the recipe.jsonl /
-    audit.json, stitch them now. Idempotent — won't overwrite existing files.
+    """If ``<output_dir>/states.json`` has libero_terminated=True in any
+    step and the recipe.jsonl / audit.json are missing, stitch them now.
+    Idempotent — won't overwrite existing files.
     """
-    wd = Path(workdir)
     out = Path(output_dir)
-    if not wd.exists():
+    if not out.exists():
         return
     recipe_path = out / f"recipe_{recipe_tag}.jsonl"
     audit_path = out / f"{recipe_tag}.json"
@@ -313,7 +336,7 @@ def _emergency_save(workdir, output_dir, suite, task, seed, recipe_tag,
     # Load the merged states.json (top-level JSON array, one entry per step).
     states: dict[int, dict] = {}
     sim_terminated = False
-    states_path = wd / "states.json"
+    states_path = out / "states.json"
     if states_path.exists():
         try:
             with open(states_path) as f:
@@ -404,7 +427,6 @@ def run_one_cell(
     no_driver: bool = False,
     verbose: bool = True,
     base_url: str | None = None,
-    workdir: str | None = None,
     perception: bool = False,
     libero_type: str | None = None,
     cerebrum_type: str = "anthropic",
@@ -413,18 +435,16 @@ def run_one_cell(
     claude_code_timeout_s: int | None = None,
     claude_code_max_budget_usd: float | None = None,
     codex_timeout_s: int | None = None,
-    transport: str = "file",
     transport_host: str = "127.0.0.1",
     transport_port: int = 0,
+    vla_endpoint: str | None = None,
 ) -> dict:
     """Solve one (suite, task, seed) cell end-to-end.
 
-    By default the driver workdir IS the log directory (``output_dir``),
-    so the driver's images/, depths/, states.json, camera_meta.json and
-    episode.mp4 land alongside the agent's recipe/audit/transcript — no
-    ``repl/`` subdir, no post-hoc copy. Pass an explicit ``workdir`` to
-    override (e.g. for parallel runs that share a single output
-    directory but want separate driver workdirs).
+    Everything for the run — the driver's images/, depths/, states.json,
+    camera_meta.json and episode.mp4, plus the agent's recipe/audit/transcript
+    — lands in ``output_dir``. For parallel runs, give each cell its own
+    ``output_dir``.
 
     ``cerebrum_type`` selects the LLM backend:
     - ``"anthropic"`` — Anthropic Messages API with tool-use (default).
@@ -437,7 +457,10 @@ def run_one_cell(
         if verbose:
             logger.info("auto-bumped max_episode_steps to 5000 for libero_10")
 
-    # ---- resolve output directory early so the workdir can live inside it ----
+    # ---- resolve output directory ----
+    # Everything for the run lands under this single directory: driver
+    # artifacts (images/, depths/, states.json, ...) and agent outputs
+    # (recipe/audit/transcript) sit side by side.
     if output_dir is None:
         output_dir = str(make_log_dir(suite=suite, task=task, seed=seed, repo_root=REPO_ROOT))
     else:
@@ -446,16 +469,8 @@ def run_one_cell(
     # Initialise unified logging for this run
     init_run_logging(output_dir)
 
-    # ---- resolve workdir ----
-    # The driver writes directly into the run's output_dir (no `repl/`
-    # subdir): images/, images_cam/, depths/, states.json, etc. live
-    # alongside the agent's recipe/audit/transcript.
-    if workdir is None:
-        workdir = output_dir
-    Path(workdir).mkdir(parents=True, exist_ok=True)
-
-    # Point the agent's tools at the per-run workdir BEFORE the loop starts.
-    tools_set_workdir(workdir)
+    # Point the agent's tools at the per-run output dir BEFORE the loop starts.
+    tools_set_output_dir(output_dir)
 
     if cerebrum_type == "anthropic":
         api_key = api_key or get_anthropic_api_key()
@@ -515,16 +530,17 @@ def run_one_cell(
             cc_budget = float(os.environ.get("MAX_BUDGET_USD", "10"))
         cc_output_path = Path(output_dir) / f"claude_{suite.replace('libero_', '')}_t{task}_s{seed}.txt"
         cerebrum = ClaudeCodeCerebrum(
-            workdir=workdir,
+            output_dir=output_dir,
             repo_root=REPO_ROOT,
             model=model or "sonnet",
             timeout_s=cc_timeout_s,
             max_budget_usd=cc_budget,
             extra_dirs=[str(get_memory_dir())],
             output_path=cc_output_path,
-            transport=transport,
             transport_host=transport_host,
             transport_port=transport_port,
+            hide_object_coords=perception,
+            video_path=str(Path(output_dir) / "episode.mp4"),
         )
     elif cerebrum_type == "codex":
         cx_timeout_s = codex_timeout_s
@@ -535,15 +551,16 @@ def run_one_cell(
             ))
         cx_output_path = Path(output_dir) / f"codex_{suite.replace('libero_', '')}_t{task}_s{seed}.txt"
         cerebrum = CodexCerebrum(
-            workdir=workdir,
+            output_dir=output_dir,
             repo_root=REPO_ROOT,
             model=model,
             timeout_s=cx_timeout_s,
             extra_dirs=[str(get_memory_dir())],
             output_path=cx_output_path,
-            transport=transport,
             transport_host=transport_host,
             transport_port=transport_port,
+            hide_object_coords=perception,
+            video_path=str(Path(output_dir) / "episode.mp4"),
         )
     else:
         raise ValueError(f"unknown cerebrum_type: {cerebrum_type}")
@@ -572,61 +589,73 @@ def run_one_cell(
             template,
             suite=suite, task=task, seed=seed,
             output_dir=output_dir, recipe_tag=recipe_tag,
-            workdir=workdir,
         )
     elif perception:
         user_msg = PERCEPTION_USER_TEMPLATE.format(
             suite=suite, task=task, seed=seed,
             output_dir=output_dir, recipe_tag=recipe_tag,
-            workdir=workdir,
         )
         system_prompt = PERCEPTION_PREFIX + SYSTEM_PROMPT
     else:
         user_msg = INITIAL_USER_TEMPLATE.format(
             suite=suite, task=task, seed=seed,
             output_dir=output_dir, recipe_tag=recipe_tag,
-            workdir=workdir,
         )
         system_prompt = SYSTEM_PROMPT
 
     proc = None
+    vla_proc = None
     if not no_driver:
         proc = start_driver(
             suite=suite, task=task, seed=seed,
-            workdir=workdir,
+            output_dir=output_dir,
             max_episode_steps=max_episode_steps,
             cuda_device=cuda_device,
             libero_type=libero_type,
-            perception=perception,
-            transport=transport,
             transport_host=transport_host,
             transport_port=transport_port,
         )
-        if transport == "socket":
-            tools_set_driver_client(create_driver_client(transport, workdir))
-            if cerebrum_type in {"claude_code", "codex"}:
-                endpoint = get_socket_endpoint(workdir)
-                if endpoint is None:
-                    raise RuntimeError(
-                        f"socket endpoint not registered for workdir: {workdir}"
-                    )
-                cerebrum.set_socket_endpoint(*endpoint)
-        if cerebrum_type == "claude_code":
-            cerebrum.set_driver_process(proc)
-        elif cerebrum_type == "codex":
-            cerebrum.set_driver_process(proc)
-    else:
-        if not (Path(workdir) / "states.json").exists():
-            raise RuntimeError(f"--no_driver but {workdir}/states.json missing")
-        if transport == "socket":
-            if transport_port <= 0:
+        if vla_endpoint is None:
+            vla_endpoint, vla_proc = start_vla_server(
+                cuda_device=cuda_device,
+                log_path=str(Path(output_dir) / "vla_server.log"),
+            )
+        if cerebrum_type in {"claude_code", "codex"}:
+            endpoint = get_socket_endpoint(output_dir)
+            if endpoint is None:
                 raise RuntimeError(
-                    "--no_driver --transport socket requires --transport_port"
+                    f"socket endpoint not registered for output_dir: {output_dir}"
                 )
-            set_socket_endpoint(workdir, transport_host, transport_port)
-            tools_set_driver_client(create_driver_client(transport, workdir))
-            if cerebrum_type in {"claude_code", "codex"}:
-                cerebrum.set_socket_endpoint(transport_host, transport_port)
+            cerebrum.set_socket_endpoint(*endpoint)
+            cerebrum.set_vla_endpoint(vla_endpoint)
+            cerebrum.set_driver_process(proc)
+        else:
+            tools_set_driver_client(
+                create_driver_client(output_dir),
+                model=VLAClient(vla_endpoint),
+                hide_object_coords=perception,
+                video_path=str(Path(output_dir) / "episode.mp4"),
+            )
+    else:
+        if transport_port <= 0:
+            raise RuntimeError(
+                "--no_driver requires --transport_port pointing at an existing driver"
+            )
+        if vla_endpoint is None:
+            raise RuntimeError(
+                "--no_driver requires --vla_endpoint pointing at an existing vla_server"
+            )
+        set_socket_endpoint(output_dir, transport_host, transport_port)
+        if cerebrum_type in {"claude_code", "codex"}:
+            cerebrum.set_socket_endpoint(transport_host, transport_port)
+            cerebrum.set_vla_endpoint(vla_endpoint)
+        else:
+            tools_set_driver_client(
+                create_driver_client(output_dir),
+                model=VLAClient(vla_endpoint),
+                hide_object_coords=perception,
+                video_path=str(Path(output_dir) / "episode.mp4"),
+            )
 
     t0 = time.time()
     finish_result, messages, agent_error = None, [], None
@@ -652,12 +681,13 @@ def run_one_cell(
         # agent crashed (or before it called finish), still write a
         # minimal recipe + audit so the run isn't lost.
         try:
-            _emergency_save(workdir, output_dir, suite, task, seed, recipe_tag,
+            _emergency_save(output_dir, suite, task, seed, recipe_tag,
                             agent_error, regime=regime, verbose=verbose)
         except Exception as e:
             logger.error("emergency save failed: %s", e)
         if proc is not None:
-            stop_driver(proc, workdir=workdir, transport=transport)
+            stop_driver(proc, output_dir=output_dir)
+        stop_vla_server(vla_proc)
 
     elapsed = time.time() - t0
 
@@ -726,16 +756,16 @@ def _build_argparser() -> argparse.ArgumentParser:
                     help="Wall-clock cap for codex exec. Defaults to CODEX_TIMEOUT_S, "
                          "or CELL_TIMEOUT_S, or 1200 in --perception mode / 600 otherwise.")
     ap.add_argument("--no_driver", action="store_true",
-                    help="Don't spawn driver; attach to existing workdir")
-    ap.add_argument("--workdir", default=None,
-                    help="Driver working directory. Default: <output_dir> itself. "
-                         "Override for parallel runs that share an output dir.")
-    ap.add_argument("--transport", choices=["file", "socket"], default="file",
-                    help="Process transport between tool frontend and driver.")
+                    help="Don't spawn driver; attach to existing output dir")
     ap.add_argument("--transport_host", default="127.0.0.1",
                     help="Socket transport bind/connect host.")
     ap.add_argument("--transport_port", type=int, default=0,
-                    help="Socket transport port. 0 asks the OS for a free port.")
+                    help="Socket transport port. 0 asks the OS for a free port; "
+                         "required with --no_driver to point at an existing driver.")
+    ap.add_argument("--vla_endpoint", default=None,
+                    help="Base URL of an existing vla_server (e.g. http://host:8000). "
+                         "If omitted with a spawned driver, a local vla_server is started; "
+                         "required with --no_driver.")
     ap.add_argument("--perception", action="store_true",
                     help="PERCEPTION-ISOLATED mode: hide object coords, "
                          "use camera+depth+back_project for localization.")
@@ -778,7 +808,6 @@ def main() -> int:
         no_driver=args.no_driver,
         verbose=not args.quiet,
         base_url=base_url,
-        workdir=args.workdir,
         perception=args.perception,
         libero_type=args.libero_type,
         cerebrum_type=args.cerebrum,
@@ -787,9 +816,9 @@ def main() -> int:
         claude_code_timeout_s=args.claude_code_timeout_s,
         claude_code_max_budget_usd=args.claude_code_max_budget_usd,
         codex_timeout_s=args.codex_timeout_s,
-        transport=args.transport,
         transport_host=args.transport_host,
         transport_port=args.transport_port,
+        vla_endpoint=args.vla_endpoint,
     )
     return 0
 

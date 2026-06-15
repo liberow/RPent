@@ -97,7 +97,7 @@ different pixel firmly on the target's top, re-back-project. Don't conclude
 ## Mental model
 
 1. **One Python process runs forever.** Pi0.5 + LIBERO sim, waiting for a command.
-2. **You write commands.** Each command is a JSON file at `{workdir}/command.json`.
+2. **You write commands.** Each command is a JSON file at `{output_dir}/command.json`.
    The driver consumes it, runs one primitive, appends a step entry to
    `states.json` and writes `images/image_NN.png` + **`images_cam/image_cam_NN.png`** +
    **`depths/depth_NN.npy`** + (once at step 00) **`camera_meta.json`**. Then it
@@ -128,16 +128,12 @@ via env: `CUDA_DEVICE=2 MODEL=claude-opus-4-7 OUTPUT_DIR=/path bash run_percepti
 
 ```bash
 cd ${PHYSICALAGENT_REPO_ROOT:-$(pwd)}
-REPL_WORKDIR="${PHYSICALAGENT_WORKDIR_PREFIX:-$(python - <<'PY'
-from physical_agent.utils.config import get_default_workdir_prefix
-print(get_default_workdir_prefix())
-PY
-)}"
+REPL_OUTPUT_DIR="${REPL_OUTPUT_DIR:-$(mktemp -d -t repl_driver.XXXXXX)}"
 CUDA_VISIBLE_DEVICES=0 LIBERO_TYPE=pro MUJOCO_GL=egl \
   python \
     physical_agent/backends/rlinf/repl_driver.py \
     --suite libero_object_swap --task 0 --seed 0 \
-    --workdir $REPL_WORKDIR \
+    --output_dir $REPL_OUTPUT_DIR \
     --max_episode_steps 600 \
     --hide_object_coords --always_render
 ```
@@ -155,7 +151,7 @@ suites; omit it (or set `standard`) for the base benchmark.
 Run in background; wait for readiness:
 
 ```bash
-until [ -f $REPL_WORKDIR/states.json ] && [ -s $REPL_WORKDIR/states.json ]; do sleep 5; done
+until [ -f $REPL_OUTPUT_DIR/states.json ] && [ -s $REPL_OUTPUT_DIR/states.json ]; do sleep 5; done
 ```
 
 ## The perception files you read each step
@@ -173,7 +169,7 @@ until [ -f $REPL_WORKDIR/states.json ] && [ -s $REPL_WORKDIR/states.json ]; do s
 ```bash
 python - <<'PY'
 import json, numpy as np
-wd = "$REPL_WORKDIR"; step = "01"; row, col = ROW, COL   # <-- fill in
+wd = "$REPL_OUTPUT_DIR"; step = "01"; row, col = ROW, COL   # <-- fill in
 cm = json.load(open(f"{wd}/camera_meta.json"))
 E  = np.array(cm["extrinsic_cam2world"])
 depth = np.load(f"{wd}/depths/depth_{step}.npy")
@@ -197,7 +193,7 @@ Tips:
 
 ## The command vocabulary
 
-Write JSON to `{workdir}/command.json`. The full primitive set (this matches
+Write JSON to `{output_dir}/command.json`. The full primitive set (this matches
 `STRICT_HYBRID_GUIDE.md` — only the *control signals* are listed here):
 
 ```jsonc
@@ -299,9 +295,9 @@ qualifier** for elevated picks (stove, cabinet-top, drawer). See
 ## Reading state / log files
 
 After every command:
-1. `Read {workdir}/states.json` (jump to entry NN) -> check `result.success`,
+1. `Read {output_dir}/states.json` (jump to entry NN) -> check `result.success`,
    `final_dist_m`, `peak_lift_m`, eef pose, gripper width, `libero_terminated`.
-2. `Read {workdir}/images_cam/image_cam_NN.png` -> visual confirmation;
+2. `Read {output_dir}/images_cam/image_cam_NN.png` -> visual confirmation;
    pick pixels for any new localization.
 
 You **do not** open `depths/depth_NN.npy` interactively — feed it to the
@@ -330,7 +326,7 @@ localization snippet above.
 Before saving the audit, run this check on your recipe-so-far:
 
 ```bash
-python -c "import json,re; s=json.load(open('$REPL_WORKDIR/states.json')); bad=re.compile(r'set_object_pose|articulate_to|js_move_to|carry_object'); hits=[e['command'].get('action') for e in s if e.get('command') and bad.search(e['command'].get('action',''))]; print('TELEPORT — REJECTED' if hits else 'physics-only ✓')"
+python -c "import json,re; s=json.load(open('$REPL_OUTPUT_DIR/states.json')); bad=re.compile(r'set_object_pose|articulate_to|js_move_to|carry_object'); hits=[e['command'].get('action') for e in s if e.get('command') and bad.search(e['command'].get('action',''))]; print('TELEPORT — REJECTED' if hits else 'physics-only ✓')"
 ```
 
 ## Persisting successful runs as audit JSONs

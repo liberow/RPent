@@ -241,8 +241,8 @@ in your plan or in the physics simulator's behavior.**
 1. **One Python process runs forever.** It loaded Pi0.5 (~90s, GPU mem ~6GB),
    built a single-env LIBERO sim, and is now blocked waiting for a command.
 2. **You write commands.** Each command is a JSON file at
-   `$REPL_WORKDIR/command.json`. The driver consumes it, runs one
-   primitive, appends a step entry to `$REPL_WORKDIR/states.json` (state
+   `$REPL_OUTPUT_DIR/command.json`. The driver consumes it, runs one
+   primitive, appends a step entry to `$REPL_OUTPUT_DIR/states.json` (state
    + command + result) and writes `images/image_NN.png`. Then it blocks
    for the next command.
 3. **You read state, decide next move, write next command. Repeat.**
@@ -254,14 +254,10 @@ freely `reset` to retry the same task.
 
 ```bash
 cd ${PHYSICALAGENT_REPO_ROOT:-$(pwd)}
-REPL_WORKDIR="${PHYSICALAGENT_WORKDIR_PREFIX:-$(python - <<'PY'
-from physical_agent.utils.config import get_default_workdir_prefix
-print(get_default_workdir_prefix())
-PY
-)}"
+REPL_OUTPUT_DIR="${REPL_OUTPUT_DIR:-$(mktemp -d -t repl_driver.XXXXXX)}"
 CUDA_VISIBLE_DEVICES=0 python \
     physical_agent/backends/rlinf/repl_driver.py \
-    --workdir "$REPL_WORKDIR" \
+    --output_dir "$REPL_OUTPUT_DIR" \
     --suite libero_10 --task <N> --seed 0 --max_episode_steps 5000
 ```
 
@@ -276,7 +272,7 @@ doesn't block. Then wait for `states.json` to exist as the readiness signal
 (~90s model load).
 
 ```bash
-until [ -f $REPL_WORKDIR/states.json ] && [ -s $REPL_WORKDIR/states.json ]; do sleep 5; done
+until [ -f $REPL_OUTPUT_DIR/states.json ] && [ -s $REPL_OUTPUT_DIR/states.json ]; do sleep 5; done
 ```
 
 Suites currently supported: `libero_spatial`, `libero_10`. Add more via
@@ -284,7 +280,7 @@ Suites currently supported: `libero_spatial`, `libero_10`. Add more via
 
 ## The command vocabulary
 
-Write JSON to `$REPL_WORKDIR/command.json`. Brief schemas below; the full
+Write JSON to `$REPL_OUTPUT_DIR/command.json`. Brief schemas below; the full
 **Extended primitives reference** section (later in this guide) explains
 when to use each, gotchas, failure trees, and worked examples (t9 strict
 recipe is documented end-to-end).
@@ -344,7 +340,7 @@ After each command, wait for the next entry to appear in states.json:
 
 ```bash
 N=<step_number>  # zero-indexed; first command after step 0 is N=1
-until python -c "import json,sys; sys.exit(0 if len(json.load(open('$REPL_WORKDIR/states.json')))>$N else 1)" 2>/dev/null; do sleep 1; done
+until python -c "import json,sys; sys.exit(0 if len(json.load(open('$REPL_OUTPUT_DIR/states.json')))>$N else 1)" 2>/dev/null; do sleep 1; done
 ```
 
 ## The strict-hybrid recipe
@@ -564,7 +560,7 @@ rlinf/envs/libero/
 python - <<'PY'
 import json, sys
 NN = 5  # step index
-states = json.load(open("$REPL_WORKDIR/states.json"))
+states = json.load(open("$REPL_OUTPUT_DIR/states.json"))
 d = states[NN]
 s = d['state']
 print('libero_term:', d['libero_terminated'])
@@ -574,7 +570,7 @@ for k, v in s['objects'].items(): print(f'  {k}: {v}')
 PY
 ```
 
-For images, use the Read tool on `$REPL_WORKDIR/images/image_<NN>.png`
+For images, use the Read tool on `$REPL_OUTPUT_DIR/images/image_<NN>.png`
 (Claude Code's Read tool renders PNGs).
 
 ## Hyperparameters that actually matter
@@ -736,7 +732,7 @@ less descent before the trigger fires.
 After each run, check the pick step entry in states.json:
 
 ```python
-states = json.load(open("$REPL_WORKDIR/states.json"))
+states = json.load(open("$REPL_OUTPUT_DIR/states.json"))
 pr = states[pick_step_idx]["result"]  # the pi0_pick step
 assert pr["libero_terminated"] == False, "Pi0 finished the task — violation!"
 assert pr["chunks_used"] < 25, "Pi0 ran too long; may have done place"
@@ -755,7 +751,7 @@ release triggered libero_term ⇒ LLM did the place**.
 ## Persisting successful runs as audit JSONs
 
 The REPL workflow is great for iteration but **leaves nothing reproducible
-behind once the driver exits** — `$REPL_WORKDIR/states.json` and the
+behind once the driver exits** — `$REPL_OUTPUT_DIR/states.json` and the
 `images/` subdir live only until the next driver run wipes them. The
 libero_spatial corpus at `results_all_spatial/tN_sM.json` is the gold
 standard: each file is a single self-contained record of one
@@ -773,7 +769,7 @@ schema, plus an entry in `all_rows.json`.
 │ 1. REPL iterate (Rule 0 + command vocab + heuristics).          │
 │    Find a command sequence that gets libero_terminated=True.    │
 │    Write each command as a JSON line in a scratch file as you   │
-│    go, e.g. $REPL_WORKDIR/recipe_t<N>_s<M>.jsonl, so the     │
+│    go, e.g. $REPL_OUTPUT_DIR/recipe_t<N>_s<M>.jsonl, so the     │
 │    final recipe is captured cleanly (do NOT rely on memory).    │
 │                                                                 │
 │ 2. Confirm strict compliance via the asserts above.             │
@@ -857,13 +853,13 @@ Run this at the end of a successful REPL session, before issuing `exit`:
 ```bash
 python - <<'PYEOF'
 import json, os
-WORKDIR = "$REPL_WORKDIR"
+OUTPUT_DIR = "$REPL_OUTPUT_DIR"
 OUTDIR  = "${PHYSICALAGENT_REPO_ROOT:-$(pwd)}/physical_agent/primitives/results_all_10"
 TASK_ID, SEED = 9, 0                                           # <- fill in
 REGIME = "strict"                                               # <- fill in ("strict" or "pi0_doubled" — Rule 1 forbids "pi0_end_to_end")
 NOTES  = "OSC IK barrier at cavity entry; Pi0 full task prompt solved in 186 chunks"
 
-states = json.load(open(os.path.join(WORKDIR, "states.json")))
+states = json.load(open(os.path.join(OUTPUT_DIR, "states.json")))
 # states is a list; indices are the step indices
 
 pick_steps    = [n for n, e in enumerate(states) if e.get("command", {}).get("action") == "pi0_pick"]
@@ -916,7 +912,7 @@ sequence (from `recipe_t<N>_s<M>.jsonl`) into a small Python module under
 # strategies/t9_strict_attempt.py — example shell
 def commands_for(task_id, seed, state_00):
     """Return a list of REPL command dicts that solve t9. Each dict is
-    exactly what you'd write to $REPL_WORKDIR/command.json."""
+    exactly what you'd write to $REPL_OUTPUT_DIR/command.json."""
     return [
         {"action": "start_recording"},
         {"action": "move_to", "xyz": [-0.020, -0.020, 1.10], "gripper": -1,
@@ -1233,8 +1229,8 @@ Cross-suite progress + non-obvious past failures:
          physical_agent/backends/rlinf/repl_driver.py \
          --suite libero_10 --task <N> --seed 0 --max_episode_steps 5000
 3. Bash run_in_background:true (wait for states.json)
-     until [ -f $REPL_WORKDIR/states.json ] && \
-            [ -s $REPL_WORKDIR/states.json ]; do sleep 5; done
+     until [ -f $REPL_OUTPUT_DIR/states.json ] && \
+            [ -s $REPL_OUTPUT_DIR/states.json ]; do sleep 5; done
 4. Read states.json[0], images/image_00.png. Identify target objects + goal regions.
 5. Iterate: REPL command -> next entry appended to states.json ->
             Read images/image_NN.png (Rule 0) -> Read states.json[NN] -> next command.

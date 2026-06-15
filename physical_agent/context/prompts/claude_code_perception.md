@@ -4,20 +4,24 @@ must localize objects yourself from the camera image + depth + calibration.
 
 A Python REPL process (`repl_driver.py`) is already running. It has
 Pi0.5 loaded and a single-env LIBERO sim. It communicates with you via the
-`physical_agent` MCP tools and writes artifacts in `{WORKDIR}/`:
+`physical_agent` MCP tools and writes artifacts in `{OUTPUT_DIR}/`:
 
-- Call `mcp__physical_agent__send_command` to issue one primitive.
+- Call one of the per-primitive MCP tools (`mcp__physical_agent__move_to`,
+  `mcp__physical_agent__pi0_pick`, `mcp__physical_agent__release`,
+  `mcp__physical_agent__set_gripper`, `mcp__physical_agent__rotate_wrist`,
+  `mcp__physical_agent__rotate_pitch`, `mcp__physical_agent__move_pose`)
+  to issue one primitive.
 - The driver consumes it and writes:
-    `{WORKDIR}/states.json`                 — top-level JSON array; each entry has
+    `{OUTPUT_DIR}/states.json`                 — top-level JSON array; each entry has
                                               step_idx, libero_terminated, state (robot
                                               proprioception + object_names; NO object
                                               coords), command, result, elapsed_s
-    `{WORKDIR}/images/image_NN.png`         — agentview RGB, 180°-rotated (Pi0 frame; do NOT
+    `{OUTPUT_DIR}/images/image_NN.png`         — agentview RGB, 180°-rotated (Pi0 frame; do NOT
                                               use for back-projection)
-    `{WORKDIR}/images_cam/image_cam_NN.png` — agentview RGB in the CALIBRATION frame; pick
+    `{OUTPUT_DIR}/images_cam/image_cam_NN.png` — agentview RGB in the CALIBRATION frame; pick
                                               object pixels HERE
-    `{WORKDIR}/depths/depth_NN.npy`         — HxW float32 metric depth (meters), calibration frame
-    `{WORKDIR}/camera_meta.json`            — camera intrinsics K, cam->world extrinsic, projection recipe
+    `{OUTPUT_DIR}/depths/depth_NN.npy`         — HxW float32 metric depth (meters), calibration frame
+    `{OUTPUT_DIR}/camera_meta.json`            — camera intrinsics K, cam->world extrinsic, projection recipe
 - NN is zero-padded sequential (`01`, `02`, ...). Initial state is step `00`,
   ALREADY ON DISK (read it now).
 
@@ -29,7 +33,7 @@ CELL
 - suite:   {SUITE}
 - task:    {TASK}
 - seed:    {SEED}
-- workdir: {WORKDIR}
+- output_dir: {OUTPUT_DIR}
 - output:  {OUTPUT_DIR}/   (save final recipe + audit here)
   - recipe filename: recipe_{TAG}.jsonl
   - audit filename:  {TAG}.json
@@ -78,7 +82,7 @@ This is the core of perception-isolated mode. To find where an object is:
 
    python - <<'PY'
    import json, numpy as np
-   wd="{WORKDIR}"; row, col = ROW, COL            # <-- your pixel
+   wd="{OUTPUT_DIR}"; row, col = ROW, COL            # <-- your pixel
    cm=json.load(open(f"{wd}/camera_meta.json"))
    E=np.array(cm["extrinsic_cam2world"])
    depth=np.load(f"{wd}/depths/depth_NN.npy")     # <-- current step NN
@@ -121,14 +125,14 @@ WORKFLOW
    `{"step": 0}` OR read states.json[0] (object_names + eef pose),
    images_cam/image_cam_00.png, camera_meta.json. Identify the target object + goal region.
 
-5. EXECUTE one primitive at a time by calling:
-       mcp__physical_agent__send_command({
-         "command": {"action": "move_to", "xyz": [x, y, z], "gripper": -1, ...}
-       })
-   This MCP tool writes the command, blocks until the next states.json entry,
-   and returns the new state entry + log + images. Do NOT manually create
-   driver command files; use MCP for every primitive. Then inspect the
-   returned state + images_cam/image_cam_NN.png (+ back-project as needed),
+5. EXECUTE one primitive at a time by calling its MCP tool, e.g.:
+       mcp__physical_agent__move_to({"xyz": [x, y, z], "gripper": -1, ...})
+       mcp__physical_agent__pi0_pick({"prompt": "...", "track_obj": "...", ...})
+       mcp__physical_agent__release({})
+   Each MCP tool blocks until the next states.json entry, and returns the
+   new state entry + log + images. Do NOT manually create driver command
+   files; use MCP for every primitive. Then inspect the returned state +
+   images_cam/image_cam_NN.png (+ back-project as needed),
    decide, repeat with NN=02, 03, ...
 
 6. ALLOWED PRIMITIVES (physics-only; full schemas in STRICT_HYBRID_GUIDE):

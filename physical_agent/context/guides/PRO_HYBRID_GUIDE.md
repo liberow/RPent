@@ -220,16 +220,12 @@ Replace `spatial` with `object`, `goal`, or `10` for the other base suites.
 ```bash
 ps -ef | grep repl_driver | grep -v grep | awk '{print $2}' | xargs -r kill
 cd ${PHYSICALAGENT_REPO_ROOT:-$(pwd)}
-REPL_WORKDIR="${PHYSICALAGENT_WORKDIR_PREFIX:-$(python - <<'PY'
-from physical_agent.utils.config import get_default_workdir_prefix
-print(get_default_workdir_prefix())
-PY
-)}"
-rm -rf "$REPL_WORKDIR"
+REPL_OUTPUT_DIR="${REPL_OUTPUT_DIR:-$(mktemp -d -t repl_driver.XXXXXX)}"
+rm -rf "$REPL_OUTPUT_DIR"
 LIBERO_TYPE=pro CUDA_VISIBLE_DEVICES=0 python \
   physical_agent/backends/rlinf/repl_driver.py \
   --suite libero_spatial_task --task 0 --seed 0 --max_episode_steps 600
-# (run in background; wait for $REPL_WORKDIR/states.json)
+# (run in background; wait for $REPL_OUTPUT_DIR/states.json)
 ```
 
 Then issue JSON commands per STRICT_HYBRID_GUIDE §"The command vocabulary".
@@ -353,7 +349,7 @@ LIBERO_TYPE=pro CUDA_VISIBLE_DEVICES=0 python \
   --suite libero_spatial_task --task <N> --seed 0 --max_episode_steps 600
 
 # 3. Wait for readiness
-until [ -f $REPL_WORKDIR/states.json ] && [ -s $REPL_WORKDIR/states.json ]; do sleep 5; done
+until [ -f $REPL_OUTPUT_DIR/states.json ] && [ -s $REPL_OUTPUT_DIR/states.json ]; do sleep 5; done
 
 # 4. Open states.json (step 0 entry) AND images/image_00.png; describe the scene; decide target
 # 5. Issue JSON commands per STRICT_HYBRID_GUIDE §"The command vocabulary"

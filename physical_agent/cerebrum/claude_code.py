@@ -1,8 +1,9 @@
 """Claude Code cerebrum — delegates the agent loop to `claude -p`.
 
 Claude Code uses normal filesystem tools for reading guides and writing final
-artifacts, and a local MCP server for driver commands such as ``send_command``.
-This cerebrum writes a combined task prompt, spawns ``claude -p`` with the MCP
+artifacts, and a local MCP server for driver commands such as per-primitive
+actions (``move_to``, ``pi0_pick``, …) and ``view_driver_state``. This
+cerebrum writes a combined task prompt, spawns ``claude -p`` with the MCP
 configuration and directory access, and waits for completion.
 """
 from __future__ import annotations
@@ -30,8 +31,8 @@ class ClaudeCodeCerebrum:
 
     Constructor parameters
     ----------------------
-    workdir:
-        driver working directory (granted to Claude Code via ``--add-dir``).
+    output_dir:
+        driver output directory (granted to Claude Code via ``--add-dir``).
     repo_root:
         Repository root (used as ``cwd`` for the subprocess so relative
         paths in the prompt resolve correctly).
@@ -53,7 +54,7 @@ class ClaudeCodeCerebrum:
     def __init__(
         self,
         *,
-        workdir: str,
+        output_dir: str,
         repo_root: str | Path | None = None,
         model: str = "sonnet",
         allowed_tools: str = "Bash Read Write Glob Grep",
@@ -63,12 +64,14 @@ class ClaudeCodeCerebrum:
         output_path: str | Path | None = None,
         driver_pid: int | None = None,
         enable_mcp: bool = True,
-        transport: str = "file",
         transport_host: str = "127.0.0.1",
         transport_port: int = 0,
+        vla_endpoint: str = "",
+        hide_object_coords: bool = False,
+        video_path: str = "",
     ):
         """Initialize the Claude Code subprocess wrapper."""
-        self._workdir = str(workdir)
+        self._output_dir = str(output_dir)
         self._repo_root = str(repo_root) if repo_root else str(get_repo_root())
         self._model = model
         self._allowed_tools = allowed_tools
@@ -77,9 +80,11 @@ class ClaudeCodeCerebrum:
         self._extra_dirs = extra_dirs or []
         self._output_path = Path(output_path) if output_path else None
         self._enable_mcp = enable_mcp
-        self._transport = transport
         self._transport_host = transport_host
         self._transport_port = int(transport_port)
+        self._vla_endpoint = vla_endpoint
+        self._hide_object_coords = bool(hide_object_coords)
+        self._video_path = video_path
 
     def set_driver_pid(self, pid: int | None) -> None:
         """Compatibility no-op for the runner interface."""
@@ -91,9 +96,12 @@ class ClaudeCodeCerebrum:
 
     def set_socket_endpoint(self, host: str, port: int) -> None:
         """Record the driver socket endpoint discovered after startup."""
-        self._transport = "socket"
         self._transport_host = host
         self._transport_port = int(port)
+
+    def set_vla_endpoint(self, endpoint: str) -> None:
+        """Record the vla_server HTTP endpoint discovered after startup."""
+        self._vla_endpoint = endpoint
 
     # ------------------------------------------------------------------
     # Cerebrum protocol
@@ -132,7 +140,7 @@ class ClaudeCodeCerebrum:
         mcp_config_file: str | None = None
         try:
             logger.info("prompt: %d chars -> %s", len(full_prompt), prompt_file)
-            logger.info("workdir: %s", self._workdir)
+            logger.info("output_dir: %s", self._output_dir)
             logger.info(
                 "invoking claude -p --model %s (timeout=%ds, budget=$%s)",
                 self._model, self._timeout_s, self._max_budget_usd,
@@ -141,22 +149,30 @@ class ClaudeCodeCerebrum:
             allowed_tools = self._allowed_tools
             if self._enable_mcp:
                 mcp_config_file = _write_physical_agent_mcp_config(
-                    workdir=self._workdir,
+                    output_dir=self._output_dir,
                     repo_root=self._repo_root,
-                    transport=self._transport,
                     transport_host=self._transport_host,
                     transport_port=self._transport_port,
+                    vla_endpoint=self._vla_endpoint,
+                    hide_object_coords=self._hide_object_coords,
+                    video_path=self._video_path,
                 )
                 allowed_tools = _append_allowed_tools(
                     allowed_tools,
                     [
-                        "mcp__physical_agent__send_command",
+                        "mcp__physical_agent__move_to",
+                        "mcp__physical_agent__pi0_pick",
+                        "mcp__physical_agent__release",
+                        "mcp__physical_agent__set_gripper",
+                        "mcp__physical_agent__rotate_wrist",
+                        "mcp__physical_agent__rotate_pitch",
+                        "mcp__physical_agent__move_pose",
                         "mcp__physical_agent__view_driver_state",
-                        "mcp__physical_agent__list_dir",
                         "mcp__physical_agent__view_camera_meta",
                         "mcp__physical_agent__back_project",
                         "mcp__physical_agent__read_text_file",
                         "mcp__physical_agent__write_text_file",
+                        "mcp__physical_agent__mcp_list_dir",
                         "mcp__physical_agent__finish",
                     ],
                 )
@@ -169,7 +185,7 @@ class ClaudeCodeCerebrum:
                 "--model", self._model,
                 "--output-format", "stream-json",
                 "--verbose",
-                "--add-dir", self._workdir,
+                "--add-dir", self._output_dir,
                 "--allowedTools", allowed_tools,
                 "--max-budget-usd", str(self._max_budget_usd),
             ]
@@ -268,44 +284,49 @@ def _append_allowed_tools(existing: str, additions: list[str]) -> str:
 
 def _write_physical_agent_mcp_config(
     *,
-    workdir: str,
+    output_dir: str,
     repo_root: str,
-    transport: str,
     transport_host: str,
     transport_port: int,
+    vla_endpoint: str,
+    hide_object_coords: bool,
+    video_path: str,
 ) -> str:
-    if transport == "socket" and transport_port <= 0:
+    if transport_port <= 0:
         raise RuntimeError("Claude Code MCP socket transport requires a bound port")
+    if not vla_endpoint:
+        raise RuntimeError("Claude Code MCP server requires a vla_endpoint")
     pythonpath = repo_root
     if os.environ.get("PYTHONPATH"):
         pythonpath = repo_root + os.pathsep + os.environ["PYTHONPATH"]
     args = [
         "-m",
         "physical_agent.cerebrum.mcp.mcp",
-        "--workdir",
-        workdir,
+        "--output-dir",
+        output_dir,
         "--repo-root",
         repo_root,
-        "--transport",
-        transport,
+        "--transport-host",
+        transport_host,
+        "--transport-port",
+        str(transport_port),
+        "--vla-endpoint",
+        vla_endpoint,
     ]
-    if transport == "socket":
-        args += [
-            "--transport-host",
-            transport_host,
-            "--transport-port",
-            str(transport_port),
-        ]
+    if hide_object_coords:
+        args.append("--hide-object-coords")
+    if video_path:
+        args += ["--video-path", video_path]
     config = {
         "mcpServers": {
             "physical_agent": {
                 "command": sys.executable,
                 "args": args,
                 "env": {
-                    "HYBRID_DRIVER_WORKDIR": workdir,
-                    "PHYSICAL_AGENT_TRANSPORT": transport,
+                    "HYBRID_DRIVER_OUTPUT_DIR": output_dir,
                     "PHYSICAL_AGENT_TRANSPORT_HOST": transport_host,
                     "PHYSICAL_AGENT_TRANSPORT_PORT": str(transport_port),
+                    "PHYSICAL_AGENT_VLA_ENDPOINT": vla_endpoint,
                     "PYTHONPATH": pythonpath,
                 },
             }

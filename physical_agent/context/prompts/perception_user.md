@@ -1,7 +1,7 @@
 Cell: suite={suite}  task={task}  seed={seed}  MODE=PERCEPTION-ISOLATED.
 
-The REPL driver is already running with --hide_object_coords. Its working
-directory is {workdir}. states.json (with step 0 entry) +
+The REPL driver is already running with --hide_object_coords. Its output
+directory is {output_dir}. states.json (with step 0 entry) +
 images/image_00.png + images_cam/image_cam_00.png + depths/depth_00.npy +
 camera_meta.json are ready. Run `mcp_list_dir` to confirm.
 
@@ -22,5 +22,7 @@ Suggested first steps:
 4. view_camera_meta() — get the calibration matrices
 5. view_driver_state(step=0) — see the initial scene (both images!)
 6. Look at images_cam/image_cam_00.png; find the target object; back_project() its pixels
-7. Plan; then send_command repeatedly until libero_terminated=True
+7. Plan; then call the primitive tools (move_to / pi0_pick / release /
+   set_gripper / rotate_wrist / rotate_pitch / move_pose) repeatedly
+   until libero_terminated=True
 8. write_text_file the recipe + audit; finish(success)

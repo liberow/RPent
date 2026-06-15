@@ -30,7 +30,6 @@ def format_claude_code_prompt(
     suite: str,
     task: int,
     seed: int,
-    workdir: str,
     recipe_tag: str,
     output_dir: str,
 ) -> str:
@@ -44,7 +43,6 @@ def format_claude_code_prompt(
         "{SUITE}": suite,
         "{TASK}": str(task),
         "{SEED}": str(seed),
-        "{WORKDIR}": workdir,
         "{TAG}": recipe_tag,
         "{OUTPUT_DIR}": output_dir,
     }

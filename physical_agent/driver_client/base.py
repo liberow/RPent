@@ -1,47 +1,33 @@
-"""Client interface for the interactive driver boundary."""
+"""Driver client interface for env + model RPC.
+
+The agent process holds a :class:`LiberoPrimitiveDriver` whose ``env`` and
+``model`` attributes are remote proxies. The proxies invoke methods on
+the driver process (which owns the LIBERO env and the OpenPI policy)
+through a :class:`DriverClient` — a thin transport that ships
+(method, args, kwargs) tuples and returns the method's return value
+verbatim.
+"""
 from __future__ import annotations
 
 from typing import Any, Protocol
 
 
 class DriverClient(Protocol):
-    """Client-side interface used by tool frontends.
+    """Transport from the agent process to the env/model host process."""
 
-    The client owns both command delivery and driver artifact access. Tool
-    implementations should not know whether those operations use workdir files,
-    sockets, or another driver-side protocol.
-    """
-
-    def send_command(
+    def call(
         self,
-        command: dict,
+        method: str,
+        args: tuple = (),
+        kwargs: dict | None = None,
         *,
-        current_step: int | None = None,
-        timeout_s: float = 600.0,
-    ) -> dict:
-        """Send one command to the driver and wait for the resulting step."""
+        timeout_s: float | None = None,
+    ) -> Any:
+        """Invoke a remote method and return its result.
 
-    def load_states(self) -> list:
-        """Return the parsed driver state trace."""
-
-    def latest_step(self) -> int | None:
-        """Return the latest recorded driver step, if any."""
-
-    def load_step(self, step: int | None = None) -> dict:
-        """Return one state trace entry, defaulting to the latest step."""
-
-    def load_image(self, step: int, kind: str = "agent") -> bytes | None:
-        """Return PNG bytes for one step.
-
-        ``kind`` is ``"agent"`` for images/image_NN.png or ``"camera"`` for
-        images_cam/image_cam_NN.png.
+        Errors on the remote side raise; the wire never returns error
+        dicts in the result slot.
         """
-
-    def load_camera_meta(self) -> dict[str, Any]:
-        """Return camera calibration metadata."""
-
-    def load_depth(self, step: int) -> Any:
-        """Return the depth array for a step."""
 
     def close(self) -> None:
         """Release any client-side transport resources."""

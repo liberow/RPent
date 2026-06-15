@@ -2,7 +2,7 @@
 
 Creates ``logs/YYYYmmdd-HH:MM:SS_<tag>/`` directories. The REPL driver
 writes its outputs (images/, depths/, states.json, episode.mp4, …)
-directly into this directory — there is no separate workdir to gather.
+directly into this directory.
 """
 from __future__ import annotations
 
