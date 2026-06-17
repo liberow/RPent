@@ -17,19 +17,6 @@ from physical_agent.utils.config import get_repo_root
 from physical_agent.utils.logging import get_output_dir
 
 
-
-def _require_output_dir() -> Path:
-    d = get_output_dir()
-    if d is None:
-        raise RuntimeError("init_output_dir() must be called before using tools")
-    return d
-
-
-def _output_dir_desc() -> str:
-    d = get_output_dir()
-    return str(d) if d is not None else "<unset>"
-
-
 # ---------------------------------------------------------------------------
 # Tool schema declarations (Anthropic-shaped canonical schema)
 # ---------------------------------------------------------------------------
@@ -127,7 +114,7 @@ def write_text_file(path: str, content: str) -> dict:
 
 def mcp_list_dir(path: str = "") -> dict:
     # Default to the current output dir (so parallel agents see their own).
-    p = _resolve(path) if path else _require_output_dir()
+    p = _resolve(path) if path else get_output_dir()
     if not p.exists():
         return {"error": f"directory not found: {p}"}
     files = sorted(os.listdir(p))
@@ -150,8 +137,7 @@ def bind_output_dir_descriptions(tools_spec: list[dict]) -> list[dict]:
     """Return tool schemas with descriptions bound to the current output dir."""
     tools = json.loads(json.dumps(tools_spec))
     replacements = {
-        "current output dir": _output_dir_desc(),
-        "Default: current output dir": f"Default: {_output_dir_desc()}",
+        "current output dir": str(get_output_dir()),
     }
     for tool in tools:
         desc = tool.get("description", "")

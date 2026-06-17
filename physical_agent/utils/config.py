@@ -34,14 +34,6 @@ def get_memory_dir() -> Path:
     return get_repo_root() / "logs" / "memory"
 
 
-def get_env_server_script() -> Path:
-    return get_repo_root() / "deployment" / "rlinf" / "env_server.py"
-
-
-def get_vla_server_script() -> Path:
-    return get_repo_root() / "deployment" / "rlinf" / "vla_server.py"
-
-
 def get_pi05_checkpoint_path() -> str:
     return os.environ.get("PI05_CHECKPOINT_PATH", "")
 

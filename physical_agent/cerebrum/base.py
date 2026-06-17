@@ -39,7 +39,7 @@ class Cerebrum(Protocol):
         tools_spec: list[dict[str, Any]],
         tool_handler: Callable[[str, dict[str, Any]], dict[str, Any]],
         tool_result_formatter: Callable[[dict[str, Any]], list[dict[str, Any]]],
-        max_turns: int = 80,
+        max_turns: int,
     ) -> CerebrumResult:
         """Run the multi-turn agent loop until completion or budget.
 

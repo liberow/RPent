@@ -25,7 +25,7 @@ class ApiAgentLoop:
         tools_spec: list[dict[str, Any]],
         tool_handler: Callable[[str, dict[str, Any]], dict[str, Any]],
         tool_result_formatter: Callable[[dict[str, Any]], list[dict[str, Any]]],
-        max_turns: int = 80,
+        max_turns: int,
     ) -> CerebrumResult:
         """Run the shared tool-calling loop until finish, stop, or budget."""
         state = self._adapter.start(

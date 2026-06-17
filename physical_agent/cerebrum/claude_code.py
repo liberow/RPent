@@ -88,7 +88,7 @@ class ClaudeCodeCerebrum:
         tools_spec: list[dict[str, Any]] | None = None,
         tool_handler: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None,
         tool_result_formatter: Callable[[dict[str, Any]], list[dict[str, Any]]] | None = None,
-        max_turns: int = 80,
+        max_turns: int,
     ) -> CerebrumResult:
         """Run ``claude -p`` with the combined system+user prompt.
 
