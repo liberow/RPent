@@ -38,35 +38,31 @@ def _tool_specs(toolkit: Toolkit) -> list[dict[str, Any]]:
     return tools
 
 
-def _tool_result_to_mcp(result: dict[str, Any]) -> dict[str, Any]:
-    if not isinstance(result, dict):
-        return {"content": [{"type": "text", "text": str(result)}]}
+def _tool_result_to_mcp(tr: Any) -> dict[str, Any]:
+    # The toolkit already formatted the result into Anthropic content blocks;
+    # translate those into the MCP content shape (text + image).
+    blocks = getattr(tr, "content_blocks", None)
+    if blocks is None:
+        return {"content": [{"type": "text", "text": str(tr)}]}
 
-    result_for_text = dict(result)
-    image = result_for_text.pop("_image_bytes", None)
-    image_cam = result_for_text.pop("_image_cam_bytes", None)
+    content: list[dict[str, Any]] = []
+    for block in blocks:
+        block_type = block.get("type")
+        if block_type == "text":
+            content.append({"type": "text", "text": block.get("text", "")})
+        elif block_type == "image":
+            src = block.get("source", {})
+            content.append(
+                {
+                    "type": "image",
+                    "data": src.get("data", ""),
+                    "mimeType": src.get("media_type", "image/png"),
+                }
+            )
 
-    content: list[dict[str, Any]] = [
-        {
-            "type": "text",
-            "text": json.dumps(result_for_text, indent=2, default=str),
-        }
-    ]
-
-    def add_png(data: bytes | None) -> None:
-        if not data:
-            return
-        content.append(
-            {
-                "type": "image",
-                "data": base64.b64encode(data).decode("ascii"),
-                "mimeType": "image/png",
-            }
-        )
-
-    add_png(image)
-    add_png(image_cam)
-    return {"content": content, "isError": bool(result_for_text.get("error"))}
+    result_dict = getattr(tr, "result", None)
+    is_error = isinstance(result_dict, dict) and bool(result_dict.get("error"))
+    return {"content": content, "isError": is_error}
 
 
 class StdioJsonRpc:

@@ -31,7 +31,6 @@ from physical_agent.driver_client import (  # noqa: E402
 from physical_agent.driver_client.vla_client import VLAClient  # noqa: E402
 from physical_agent.tools import (  # noqa: E402
     create_toolkit,
-    tool_result_to_content_blocks,
 )
 from physical_agent.utils.logging import get_logger, init_output_dir  # noqa: E402
 
@@ -451,7 +450,6 @@ def main() -> int:
             user_message=user_msg,
             tools_spec=toolkit.get_tools_spec(),
             tool_handler=toolkit.execute_tool,
-            tool_result_formatter=tool_result_to_content_blocks,
             max_turns=args.max_turns,
         )
         finish_result = result.finish_result

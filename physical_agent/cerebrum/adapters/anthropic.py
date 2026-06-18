@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import copy
 import json
-from typing import Any, Callable
+from typing import Any
 
 import anthropic
 
@@ -89,14 +89,13 @@ class AnthropicAdapter(ApiAdapter):
         self,
         state: ConversationState,
         tool_results: list[ToolResult],
-        tool_result_formatter: Callable[[dict[str, Any]], list[dict[str, Any]]],
     ) -> None:
         content = []
-        for tool_result in tool_results:
+        for tr in tool_results:
             content.append({
                 "type": "tool_result",
-                "tool_use_id": tool_result.call_id,
-                "content": tool_result_formatter(tool_result.result),
+                "tool_use_id": tr.call_id,
+                "content": tr.content_blocks,
             })
         state.messages.append({"role": "user", "content": content})
 

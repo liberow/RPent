@@ -85,12 +85,11 @@ class ClaudeCodeCerebrum:
         system_prompt: str,
         user_message: str,
         tools_spec: list[dict[str, Any]] | None = None,
-        tool_handler: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None,
-        tool_result_formatter: Callable[[dict[str, Any]], list[dict[str, Any]]] | None = None,
+        tool_handler: Callable[[str, dict[str, Any]], Any] | None = None,
         max_turns: int,
     ) -> CerebrumResult:
         """Run one Claude Agent SDK session for the given prompt."""
-        del tools_spec, tool_handler, tool_result_formatter
+        del tools_spec, tool_handler
         prompt = f"{system_prompt}\n\n{user_message}" if system_prompt else user_message
         return asyncio.run(
             self._solve_async(
@@ -451,30 +450,31 @@ def _build_physical_agent_server(sdk: Any, *, env_name: str) -> Any:
     )
 
 
-def _tool_result_to_mcp(result: Any) -> dict[str, Any]:
-    if not isinstance(result, dict):
-        return {"content": [{"type": "text", "text": str(result)}]}
+def _tool_result_to_mcp(tr: Any) -> dict[str, Any]:
+    # The toolkit already formatted the result into Anthropic content blocks;
+    # translate those into the MCP content shape (text + image).
+    blocks = getattr(tr, "content_blocks", None)
+    if blocks is None:
+        return {"content": [{"type": "text", "text": str(tr)}]}
 
-    result_for_text = dict(result)
-    images = [
-        result_for_text.pop("_image_bytes", None),
-        result_for_text.pop("_image_cam_bytes", None),
-    ]
-    content: list[dict[str, Any]] = [
-        {"type": "text", "text": json.dumps(result_for_text, indent=2, default=str)},
-    ]
-    for data in images:
-        if data:
+    content: list[dict[str, Any]] = []
+    for block in blocks:
+        block_type = _get(block, "type")
+        if block_type == "text":
+            content.append({"type": "text", "text": _get(block, "text", "")})
+        elif block_type == "image":
+            src = _get(block, "source", {})
             content.append(
                 {
                     "type": "image",
-                    "data": base64.b64encode(data).decode("ascii"),
-                    "mimeType": "image/png",
+                    "data": _get(src, "data", ""),
+                    "mimeType": _get(src, "media_type", "image/png"),
                 }
             )
 
     response: dict[str, Any] = {"content": content}
-    if result_for_text.get("error"):
+    result_dict = getattr(tr, "result", None)
+    if isinstance(result_dict, dict) and result_dict.get("error"):
         response["is_error"] = True
     return response
 

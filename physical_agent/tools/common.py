@@ -8,8 +8,6 @@ provided by :mod:`physical_agent.envs` and merged by :mod:`physical_agent.tools`
 """
 from __future__ import annotations
 
-import base64
-import json
 import os
 from pathlib import Path
 
@@ -126,46 +124,3 @@ TOOL_HANDLERS: dict = {
     "write_text_file": write_text_file,
     "mcp_list_dir": mcp_list_dir,
 }
-
-
-# ---------------------------------------------------------------------------
-# Convert tool result -> Anthropic content blocks (text + optional image)
-# ---------------------------------------------------------------------------
-
-MAX_TEXT_BYTES_IN_RESULT = 60000
-
-
-def tool_result_to_content_blocks(result):
-    """Build a list of Anthropic content blocks from a tool result dict.
-
-    If the result has private image bytes, those PNGs are included as base64
-    image blocks (alongside a text block with the JSON state).
-    """
-    if not isinstance(result, dict):
-        return [{"type": "text", "text": str(result)[:MAX_TEXT_BYTES_IN_RESULT]}]
-
-    result_for_text = dict(result)
-    image = result_for_text.pop("_image_bytes", None)
-    image_cam = result_for_text.pop("_image_cam_bytes", None)
-    text = json.dumps(result_for_text, indent=2, default=str)
-    if len(text) > MAX_TEXT_BYTES_IN_RESULT:
-        text = text[:MAX_TEXT_BYTES_IN_RESULT] + "\n[truncated]"
-
-    blocks = [{"type": "text", "text": text}]
-
-    def _add_image_bytes(data_bytes: bytes):
-        data = base64.b64encode(data_bytes).decode("utf-8")
-        blocks.append({
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": "image/png",
-                "data": data,
-            },
-        })
-
-    if image:
-        _add_image_bytes(image)
-    if image_cam:
-        _add_image_bytes(image_cam)
-    return blocks

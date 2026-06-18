@@ -7,7 +7,6 @@ from physical_agent.utils.logging import get_output_dir
 
 
 def default_replacements() -> dict[str, str]:
-
     return {
         "{output_dir}": str(get_output_dir())
     }

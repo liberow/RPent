@@ -4,8 +4,9 @@ from __future__ import annotations
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
+from physical_agent.tools.toolkit import ToolResult
 from physical_agent.utils.logging import get_logger
 
 
@@ -18,15 +19,6 @@ class ToolCall:
     arguments: dict[str, Any]
     raw_arguments: Any = None
     parse_error: str | None = None
-
-
-@dataclass
-class ToolResult:
-    """Result of executing one normalised tool call."""
-
-    call_id: str
-    name: str
-    result: dict[str, Any]
 
 
 @dataclass
@@ -92,7 +84,6 @@ class ApiAdapter(ABC):
         self,
         state: ConversationState,
         tool_results: list[ToolResult],
-        tool_result_formatter: Callable[[dict[str, Any]], list[dict[str, Any]]],
     ) -> None:
         """Append provider-native tool-result messages to conversation state."""
 

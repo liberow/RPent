@@ -15,6 +15,7 @@ from physical_agent.utils.config import (
     get_openai_compat_model,
     get_repo_root,
 )
+from physical_agent.tools.toolkit import ToolResult
 
 
 class CerebrumResult:
@@ -51,8 +52,7 @@ class Cerebrum(Protocol):
         system_prompt: str,
         user_message: str,
         tools_spec: list[dict[str, Any]],
-        tool_handler: Callable[[str, dict[str, Any]], dict[str, Any]],
-        tool_result_formatter: Callable[[dict[str, Any]], list[dict[str, Any]]],
+        tool_handler: Callable[[str, dict[str, Any]], ToolResult],
         max_turns: int,
     ) -> CerebrumResult:
         """Run the multi-turn agent loop until completion or budget.
@@ -61,8 +61,10 @@ class Cerebrum(Protocol):
             system_prompt: System-level instructions (role, rules, workflow).
             user_message: Initial user message (task description, first steps).
             tools_spec: Anthropic-style tool definitions list.
-            tool_handler: ``(name, input_dict) -> result_dict``.
-            tool_result_formatter: ``result_dict -> list[content_block]``.
+            tool_handler: ``(name, input_dict) -> ToolResult``. The returned
+                :class:`~physical_agent.tools.toolkit.ToolResult` already
+                carries formatted content blocks, so no separate formatter is
+                forwarded.
             max_turns: Maximum LLM turns before giving up.
 
         Returns:

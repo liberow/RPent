@@ -7,10 +7,77 @@ result through :meth:`Toolkit.get_tools_spec` and
 """
 from __future__ import annotations
 
+import base64
+import json
 from collections.abc import Callable
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, ClassVar
 
 from physical_agent.utils.templates import bind_placeholders
+
+
+@dataclass
+class ToolResult:
+    """Result of executing one tool call.
+
+    Carries the raw result dict (for logging and finish-signal detection)
+    alongside the Anthropic-shaped content blocks the LLM consumes.
+    """
+
+    name: str
+    result: dict[str, Any]
+    call_id: str | None = None
+
+    content_blocks: list[dict[str, Any]] = field(
+        default_factory=list, init=False, repr=False
+    )
+    is_finish: bool = field(default=False, init=False)
+
+    #: Max bytes of the text block emitted in :attr:`content_blocks`.
+    MAX_TEXT_BYTES_IN_RESULT: ClassVar[int] = 60000
+
+    def __post_init__(self) -> None:
+        self.content_blocks = self._build_content_blocks()
+        self.is_finish = bool(
+            isinstance(self.result, dict) and self.result.get("_finish")
+        )
+
+    def _build_content_blocks(self) -> list[dict[str, Any]]:
+        """Build Anthropic-shaped content blocks (text + optional images).
+
+        Strips any ``_image_bytes`` / ``_image_cam_bytes`` payloads from the
+        text block and emits them as separate base64 image blocks so the LLM
+        receives the agentview PNGs as multimodal content.
+        """
+        result = self.result
+        if not isinstance(result, dict):
+            return [{"type": "text", "text": str(result)[:self.MAX_TEXT_BYTES_IN_RESULT]}]
+
+        result_for_text = dict(result)
+        image = result_for_text.pop("_image_bytes", None)
+        image_cam = result_for_text.pop("_image_cam_bytes", None)
+        text = json.dumps(result_for_text, indent=2, default=str)
+        if len(text) > self.MAX_TEXT_BYTES_IN_RESULT:
+            text = text[:self.MAX_TEXT_BYTES_IN_RESULT] + "\n[truncated]"
+
+        blocks: list[dict[str, Any]] = [{"type": "text", "text": text}]
+
+        def _add_image_bytes(data_bytes: bytes) -> None:
+            data = base64.b64encode(data_bytes).decode("utf-8")
+            blocks.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": data,
+                },
+            })
+
+        if image:
+            _add_image_bytes(image)
+        if image_cam:
+            _add_image_bytes(image_cam)
+        return blocks
 
 
 class Toolkit:
@@ -71,20 +138,23 @@ class Toolkit:
             [spec for spec, _ in self._tools.values()]
         )
 
-    def execute_tool(self, name: str, input_dict: dict[str, Any]) -> dict[str, Any]:
+    def execute_tool(self, name: str, input_dict: dict[str, Any]) -> ToolResult:
         """Dispatch a tool call to its registered handler."""
         entry = self._tools.get(name)
         if entry is None:
-            return {"error": f"unknown tool: {name}"}
+            return ToolResult(name=name, result={"error": f"unknown tool: {name}"})
         handler = entry[1]
         try:
-            return handler(**input_dict)
+            result = handler(**input_dict)
         except TypeError as e:
-            return {"error": f"bad arguments for {name}: {e}", "got": input_dict}
+            result = {"error": f"bad arguments for {name}: {e}", "got": input_dict}
         except Exception as e:
             import traceback
 
-            return {"error": str(e), "traceback": traceback.format_exc()}
+            result = {"error": str(e), "traceback": traceback.format_exc()}
+        if not isinstance(result, dict):
+            result = {"value": result}
+        return ToolResult(name=name, result=result)
 
     # ------------------------------------------------------------------
     # Driver lifecycle hooks (overridden by env toolkits)

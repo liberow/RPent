@@ -80,12 +80,11 @@ class CodexCerebrum:
         system_prompt: str,
         user_message: str,
         tools_spec: list[dict[str, Any]] | None = None,
-        tool_handler: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None,
-        tool_result_formatter: Callable[[dict[str, Any]], list[dict[str, Any]]] | None = None,
+        tool_handler: Callable[[str, dict[str, Any]], Any] | None = None,
         max_turns: int,
     ) -> CerebrumResult:
         """Run one Codex SDK turn for the given prompt."""
-        del tools_spec, tool_handler, tool_result_formatter
+        del tools_spec, tool_handler
         prompt = f"{system_prompt}\n\n{user_message}" if system_prompt else user_message
         if self._output_path is None:
             with tempfile.NamedTemporaryFile(

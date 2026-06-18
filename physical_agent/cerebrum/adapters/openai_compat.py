@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import copy
 import json
-from typing import Any, Callable
+from typing import Any
 
 from physical_agent.cerebrum.adapters.base import (
     ApiAdapter,
@@ -80,19 +80,17 @@ class OpenAICompatibleAdapter(ApiAdapter):
         self,
         state: ConversationState,
         tool_results: list[ToolResult],
-        tool_result_formatter: Callable[[dict[str, Any]], list[dict[str, Any]]],
     ) -> None:
         tool_messages = []
         image_blocks = []
-        for tool_result in tool_results:
+        for tr in tool_results:
             tool_text, tool_image_blocks = format_tool_result_for_openai(
-                tool_result.result,
-                tool_result_formatter,
-                tool_name=tool_result.name,
+                tr.content_blocks,
+                tool_name=tr.name,
             )
             tool_messages.append({
                 "role": "tool",
-                "tool_call_id": tool_result.call_id,
+                "tool_call_id": tr.call_id,
                 "content": tool_text,
             })
             image_blocks.extend(tool_image_blocks)
@@ -182,18 +180,20 @@ def anthropic_tools_to_openai_tools(
 
 
 def format_tool_result_for_openai(
-    result: dict[str, Any],
-    tool_result_formatter: Callable[[dict[str, Any]], list[dict[str, Any]]],
+    content_blocks: list[dict[str, Any]],
     *,
     tool_name: str,
 ) -> tuple[str, list[dict[str, Any]]]:
-    """Convert Anthropic-style content blocks into OpenAI messages."""
-    formatter_input = copy.deepcopy(result) if isinstance(result, dict) else result
-    blocks = tool_result_formatter(formatter_input)
+    """Convert Anthropic-style content blocks into OpenAI messages.
+
+    The toolkit has already formatted the raw result dict into Anthropic
+    content blocks (text + image); this function only does the
+    provider-specific translation to OpenAI's ``text`` / ``image_url`` shape.
+    """
     text_parts: list[str] = []
     image_blocks: list[dict[str, Any]] = []
 
-    for block in blocks:
+    for block in content_blocks:
         block_type = _get(block, "type")
         if block_type == "text":
             text = _get(block, "text", "")
