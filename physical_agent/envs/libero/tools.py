@@ -1,19 +1,4 @@
-"""LIBERO + OpenPI tool implementation (host-side).
-
-Owns the primitives the agent invokes — ``move_to``, ``pi0_pick``,
-``rotate_wrist``, ``rotate_pitch``, ``move_pose``, ``release``,
-``set_gripper`` — together with state/image/depth artifact recording and
-the per-command dispatcher that sits behind both the file and socket
-transports.
-
-This module is RLinf-agnostic: it consumes a minimal :class:`EnvInterface`
-+ :class:`ModelInterface` protocol so the host process (currently
-``deployment/rlinf/env_server.py``) can wire in any provider.
-
-The bottom of this module also exports a libero-specific ``TOOLS_SPEC`` /
-``TOOL_HANDLERS`` pair that :mod:`physical_agent.envs.libero` contributes
-through the environment registry.
-"""
+"""LIBERO + OpenPI tool implementation."""
 from __future__ import annotations
 
 import json

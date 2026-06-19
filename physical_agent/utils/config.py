@@ -1,8 +1,4 @@
-"""Centralised path resolution and environment-variable configuration.
-
-Every other module should import its paths and defaults from here instead
-of computing ``Path(__file__).resolve().parents[N]`` ad-hoc.
-"""
+"""Path resolution and environment-variable configuration."""
 from __future__ import annotations
 
 import os

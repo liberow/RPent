@@ -1,6 +1,5 @@
 """HTTP client for the Pi0.5 VLA `/predict` server.
 
-Used by ``LiberoPrimitiveDriver`` in place of an in-process openpi model.
 The server lifecycle is the caller's responsibility: bring up
 ``deployment/rlinf/vla_server.py`` (or any compatible ``/predict``
 implementation) before constructing this client.

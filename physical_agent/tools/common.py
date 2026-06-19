@@ -1,11 +1,4 @@
-"""Agent-side LLM tool registry.
-
-Defines the schemas the LLM sees, the dispatch glue for tool calls, and
-the conversion of tool results into multimodal content blocks.
-
-Generic file/IO tools live in this module. Environment-specific tools are
-provided by :mod:`physical_agent.envs` and merged by :mod:`physical_agent.tools`.
-"""
+"""Common physical agent tools."""
 from __future__ import annotations
 
 import os
@@ -14,10 +7,6 @@ from pathlib import Path
 from physical_agent.utils.config import get_repo_root
 from physical_agent.utils.logging import get_output_dir
 
-
-# ---------------------------------------------------------------------------
-# Tool schema declarations (Anthropic-shaped canonical schema)
-# ---------------------------------------------------------------------------
 
 TOOLS_SPEC: list[dict] = [
     {
@@ -67,11 +56,6 @@ TOOLS_SPEC: list[dict] = [
         },
     },
 ]
-
-
-# ---------------------------------------------------------------------------
-# Tool implementations
-# ---------------------------------------------------------------------------
 
 
 def _resolve(path: str) -> Path:

@@ -1,8 +1,7 @@
-"""Toolkit base class for agent tools.
+"""Base class for agent tools.
 
-``Toolkit`` is the agent-facing tool container. Subclasses register tools
-during ``__init__`` via :meth:`Toolkit.add_tool`; the cerebrum consumes the
-result through :meth:`Toolkit.get_tools_spec` and
+``Toolkit`` is the agent-facing tool container. Subclasses can register tools
+during ``__init__`` via :meth:`Toolkit.add_tool`; the cerebrum calls the tools through :meth:`Toolkit.get_tools_spec` and
 :meth:`Toolkit.execute_tool`.
 """
 from __future__ import annotations
