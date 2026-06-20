@@ -10,6 +10,7 @@ import base64
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
+import traceback
 from typing import Any, ClassVar
 
 from physical_agent.utils.templates import bind_placeholders
@@ -148,11 +149,7 @@ class Toolkit:
         except TypeError as e:
             result = {"error": f"bad arguments for {name}: {e}", "got": input_dict}
         except Exception as e:
-            import traceback
-
             result = {"error": str(e), "traceback": traceback.format_exc()}
-        if not isinstance(result, dict):
-            result = {"value": result}
         return ToolResult(name=name, result=result)
 
     # ------------------------------------------------------------------

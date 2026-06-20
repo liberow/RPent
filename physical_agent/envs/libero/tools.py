@@ -3,16 +3,13 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
-import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import imageio.v2 as imageio
 import numpy as np
 
-from physical_agent.driver_client.base import DriverClient
-from physical_agent.driver_client.proxies import RemoteEnvProxy
+from physical_agent.driver_client.vla_client import VLAClient
 from physical_agent.utils.logging import get_logger, get_output_dir
 
 logger = get_logger("libero")
@@ -57,21 +54,6 @@ class EnvInterface(Protocol):
     def cached_image(self) -> np.ndarray | None:
         """Most recent agentview frame in Pi0 convention, or ``None``.
         Used as a fallback when image rendering is disabled."""
-
-
-class ModelInterface(Protocol):
-    """OpenPI-style policy contract.
-
-    Matches ``rlinf.models.embodiment.openpi.get_model(...).predict_action_batch``
-    and ``physical_agent.driver_client.vla_client.VLAClient.predict_action_batch``
-    so either provider can be plugged in directly.
-    """
-
-    def predict_action_batch(
-        self, obs: dict, *, mode: str = "eval"
-    ) -> tuple[np.ndarray, dict]:
-        """Return ``(actions, info)`` where ``actions`` has shape
-        ``[num_envs, chunk_size, action_dim]`` as a numpy array."""
 
 
 def _as_numpy_array(x):
@@ -138,7 +120,7 @@ class LiberoPrimitiveDriver:
     def __init__(
         self,
         env: EnvInterface,
-        model: ModelInterface,
+        model: VLAClient,
         action_chunk: int = 5,
         env_idx: int = 0,
     ):
@@ -969,84 +951,6 @@ def dump_state(driver: LiberoPrimitiveDriver, output_dir: str, step_idx: int,
     return blob
 
 
-# ===========================================================================
-# Agent-side tool layer
-# ===========================================================================
-#
-# Below this point: TOOLS_SPEC + handlers for the libero primitives that the
-# LLM invokes. Each handler issues ONE primitive against LIBERO_DRIVER (the
-# agent-side ``LiberoPrimitiveDriver``), dumps a new state entry, and returns
-# the new ``view_driver_state(step)`` payload. The LIBERO env spec contributes
-# these schemas and handlers to the agent-facing tool registry.
-
-
-# Wire transport to the driver subprocess (env + model only). Set by
-# set_driver_client(); None until the driver is up.
-DRIVER_CLIENT: DriverClient | None = None
-
-# Agent-side primitive driver. Built in set_driver_client() once the
-# wire is ready, then invoked by every per-primitive handler below.
-LIBERO_DRIVER: LiberoPrimitiveDriver | None = None
-
-# Where stop_recording_and_save() should write the episode video. The
-# runner owns the lifecycle; handlers never touch this.
-VIDEO_PATH: str | None = None
-
-# Monotonic step counter for dump_state. Step 0 is the post-reset frame
-# written by set_driver_client(); each primitive bumps this by 1.
-_NEXT_STEP: int = 0
-
-# Per-episode rendering policy. Drives dump_state's object-pose blackout.
-_HIDE_OBJECT_COORDS: bool = False
-
-
-def set_driver_client(
-    client: DriverClient,
-    *,
-    model: ModelInterface,
-    hide_object_coords: bool = False,
-    video_path: str | None = None,
-) -> None:
-    """Bind the wire, build the agent-side primitive driver, wipe stale
-    output artifacts, reset the env, and dump step 0.
-
-    ``model`` is consumed directly (typically a
-    :class:`~physical_agent.driver_client.vla_client.VLAClient` pointed at
-    a remote ``vla_server``). The env side still goes over the
-    socket/pickle :class:`DriverClient` via :class:`RemoteEnvProxy`.
-    """
-    global DRIVER_CLIENT, LIBERO_DRIVER, VIDEO_PATH
-    global _NEXT_STEP, _HIDE_OBJECT_COORDS
-
-    DRIVER_CLIENT = client
-    _HIDE_OBJECT_COORDS = hide_object_coords
-    VIDEO_PATH = video_path
-
-    out_dir = get_output_dir()
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for sub in ("images", "images_cam", "depths"):
-        target = out_dir / sub
-        if target.exists():
-            shutil.rmtree(target)
-    for fname in ("states.json", "camera_meta.json", "episode.mp4"):
-        target = out_dir / fname
-        if target.exists():
-            target.unlink()
-
-    driver = LiberoPrimitiveDriver(
-        env=RemoteEnvProxy(client),
-        model=model,
-        action_chunk=5,
-    )
-    driver._hide_object_coords = hide_object_coords
-    driver.reset()
-    driver.start_recording()
-    dump_state(driver, str(out_dir), step_idx=0, log=None)
-
-    LIBERO_DRIVER = driver
-    _NEXT_STEP = 0
-
-
 # ---------------------------------------------------------------------------
 # Tool schema declarations (Anthropic-shaped canonical schema)
 # ---------------------------------------------------------------------------
@@ -1072,17 +976,6 @@ TOOLS_SPEC = [
             },
         },
     },
-    # --- Driver primitives -------------------------------------------------
-    # Each of the tools below issues ONE primitive command to the driver
-    # process (via the underlying transport client) and BLOCKS until the new
-    # step is available in `states.json`. The return value is the new state
-    # entry + log + agentview image (same shape as view_driver_state).
-    #
-    # `reset` and `exit` are intentionally not exposed: the single-episode
-    # contract is enforced by simply not giving the agent a tool that can
-    # emit them. Recover from failures inside the current episode, or call
-    # finish(status='stuck'). Every motion goes through the OSC controller
-    # or Pi0 (real contact) — there is no teleport primitive.
     {
         "name": "move_to",
         "description": (
@@ -1403,77 +1296,8 @@ def view_driver_state(step: int | None = None) -> dict:
     return out
 
 
-# Actions the agent is NOT allowed to issue. The single-episode contract is
-# enforced by simply not exposing them as tools:
-#   - reset: would let the agent retry forever — defeats single-attempt eval.
-#   - exit: belongs to the runner's cleanup path; if the agent issued it
-#     mid-run the driver would terminate and the audit would be lost.
-
-
-def _require_driver() -> LiberoPrimitiveDriver:
-    if LIBERO_DRIVER is None:
-        raise RuntimeError("driver not initialized; call set_driver_client first")
-    return LIBERO_DRIVER
-
-
-# Tool names whose handler is ``getattr(LIBERO_DRIVER, name)(**input)``. The
-# TOOLS_SPEC schema for each entry uses the matching driver method's kwarg
-# names verbatim, so the dispatcher can forward the LLM input dict directly.
-_DRIVER_PRIMITIVES = (
-    "move_to",
-    "pi0_pick",
-    "release",
-    "set_gripper",
-    "rotate_wrist",
-    "rotate_pitch",
-    "move_pose",
-)
-
-
-def _run_driver_primitive(name: str, **kwargs) -> dict:
-    """Call ``LIBERO_DRIVER.<name>(**kwargs)``, dump the new step, and
-    return the rendered state view + log."""
-    global _NEXT_STEP
-    driver = _require_driver()
-    command = {"action": name, **kwargs}
-
-    t0 = time.time()
-    result = getattr(driver, name)(**kwargs)
-    elapsed = round(time.time() - t0, 2)
-
-    if isinstance(result, dict):
-        result_dict = result
-    elif hasattr(result, "__dataclass_fields__"):
-        result_dict = result.__dict__
-    else:
-        result_dict = {"value": result}
-
-    _NEXT_STEP += 1
-    step_idx = _NEXT_STEP
-    dump_state(
-        driver,
-        str(get_output_dir()),
-        step_idx=step_idx,
-        log={"command": command, "result": result_dict, "elapsed_s": elapsed},
-    )
-    out = view_driver_state(step_idx)
-    out["agent_elapsed_s"] = elapsed
-    return out
-
-
 def finish(status: str, summary: str) -> dict:
     return {"_finish": True, "status": status, "summary": summary}
-
-
-def stop_recording_and_save() -> None:
-    """Flush the agent-side video buffer to disk (runner-side, end-of-run)."""
-    if LIBERO_DRIVER is None or VIDEO_PATH is None:
-        return
-    try:
-        LIBERO_DRIVER.stop_recording_and_save(VIDEO_PATH)
-    except Exception:
-        # The runner is in the cleanup path; never let a video save abort it.
-        pass
 
 
 def view_camera_meta() -> dict:
@@ -1535,19 +1359,3 @@ def back_project(row: int, col: int, step: int | None = None) -> dict:
         "step": nn,
         "image_size": [height, width],
     }
-
-
-def _make_primitive_handler(name: str):
-    def _handler(**kwargs):
-        return _run_driver_primitive(name, **kwargs)
-    _handler.__name__ = name
-    return _handler
-
-
-TOOL_HANDLERS = {
-    "view_driver_state": view_driver_state,
-    "view_camera_meta": view_camera_meta,
-    "back_project": back_project,
-    "finish": finish,
-    **{name: _make_primitive_handler(name) for name in _DRIVER_PRIMITIVES},
-}
