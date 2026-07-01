@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 from physical_agent.context.prompt_utils import BulletList, Numbered
-from physical_agent.envs.libero.prompts.shared import LIBERO_GUIDES, MCP_RUNTIME_ADAPTER
+from physical_agent.envs.libero.prompts.shared import GUIDE_READ_INSTRUCTIONS, MCP_RUNTIME_ADAPTER
 
 WORKFLOW = """
 1. READ MEMORY FIRST (operating wisdom — magic numbers + gotchas):
      `resources/libero/memory/MEMORY.md`
    Scan it, then `Read` the 3-5 most relevant feedback_*.md for your cell.
 
-2. APPLY CURRENT MCP RUNTIME ADAPTER BEFORE USING EMBEDDED GUIDES:
+2. APPLY CURRENT MCP RUNTIME ADAPTER BEFORE USING GUIDE SOURCE FILES:
 """ + MCP_RUNTIME_ADAPTER + """
-""" + LIBERO_GUIDES + """
-3. USE PAST EXPERIENCE AS A STRATEGY PRIOR (not as coords):
+
+3. READ GUIDE SOURCE FILES ONCE:
+""" + GUIDE_READ_INSTRUCTIONS + """
+
+4. USE PAST EXPERIENCE AS A STRATEGY PRIOR (not as coords):
    - resources/libero/results_object_pert/   and   primitives/results_all_object_new/
    - Pattern: recipe_<suite>_<pert>_t<N>_s0.jsonl + <...>.json audit.
    These recipes were built WITH oracle coords; their numbers are tuned for a
@@ -21,11 +24,11 @@ WORKFLOW = """
    primitive sequence, offsets). Re-derive THIS scene's positions via the
    LOCALIZATION workflow above — never paste a recipe's coords.
 
-4. INSPECT INITIAL STATE: Call the `view_driver_state` tool with
+5. INSPECT INITIAL STATE: Call the `view_driver_state` tool with
    `{"step": 0}` OR read states.json[0] (object_names + eef pose),
    images_cam/image_cam_00.png, camera_meta.json. Identify the target object + goal region.
 
-5. EXECUTE one primitive at a time by calling its tool, e.g.:
+6. EXECUTE one primitive at a time by calling its tool, e.g.:
 
        move_to({"xyz": [x, y, z], "gripper": -1, ...})
        pi0_pick({"prompt": "...", "track_obj": "...", ...})
@@ -37,18 +40,18 @@ WORKFLOW = """
    images_cam/image_cam_NN.png (+ back-project as needed),
    decide, repeat with NN=02, 03, ...
 
-6. ALLOWED PRIMITIVES (physics-only; full schemas in STRICT_HYBRID_GUIDE):
+7. ALLOWED PRIMITIVES (physics-only; full schemas in the guide source files):
    move_to, pi0_pick, pi0_doubled, release, set_gripper, rotate_wrist,
    rotate_pitch, move_pose.
    FORBIDDEN: reset, exit, set_object_pose, articulate_to, js_move_to, carry_object.
 
-7. RECOVERY (no reset): re-localize (objects may have moved), re-pre-position +
+8. RECOVERY (no reset): re-localize (objects may have moved), re-pre-position +
    re-pi0_pick on the next prompt-ladder rung; split long traversals into <0.30
    xy waypoints; for a door/drawer/knob use a SHORT capped OSC push or pi0_doubled
    (never one long push — it NaNs MuJoCo). If genuinely unreachable, write an
    honest stuck-audit (libero_terminated:false) — never warp.
 
-8. WHEN state.libero_terminated == True:
+9. WHEN state.libero_terminated == True:
    a. Write audit {{output_dir}}/{{recipe_tag}}.json with: suite, task_id, seed, strategy_notes (incl. how you localized),
       pick_result, final_state (latest states.json entry's `state`), libero_terminated:true.
    b. Stop.
@@ -157,7 +160,7 @@ ENVIRONMENT = BulletList([
 ])
 
 NEXT = """
-Begin by reading MEMORY.md, then use the embedded guide sections, then
+Begin by reading MEMORY.md, then Read the guide source files, then
 states.json[0], images_cam/image_cam_00.png, camera_meta.json, and depth.
 Localize via back_project before planning.
 """

@@ -1,7 +1,4 @@
-"""LIBERO calibration guide prompt text."""
-from __future__ import annotations
-
-ENV_CALIBRATION = r'''# LIBERO-PRO Environment Calibration
+# LIBERO-PRO Environment Calibration
 
 Measured 2026-05-20 on `libero_10_with_mug` t0 (LIVING_ROOM frame) and t8
 (KITCHEN frame). All probes use `move_to` with `gripper=-1` and tight
@@ -154,4 +151,4 @@ echo '{"action":"move_to","xyz":[-0.20, 0.10, 0.65],
        "gripper":-1,"tol":0.008,"step_clip":0.010,"max_steps":80}' \
   > $OUTPUT_DIR/command.json
 # read $OUTPUT_DIR/states.json (entry NN) for final_eef_pos & final_dist_m
-```'''
+```

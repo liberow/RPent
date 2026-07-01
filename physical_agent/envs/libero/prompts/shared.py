@@ -2,12 +2,6 @@
 
 from __future__ import annotations
 
-from physical_agent.envs.libero.prompts.env_calibration import ENV_CALIBRATION
-from physical_agent.envs.libero.prompts.pro_hybrid_guide import PRO_HYBRID_GUIDE
-from physical_agent.envs.libero.prompts.strict_hybrid_guide import (
-    STRICT_HYBRID_GUIDE,
-)
-
 MCP_RUNTIME_ADAPTER = """
 CURRENT MCP RUNTIME ADAPTER:
 - The environment server is already running and managed by the runner.
@@ -18,7 +12,7 @@ CURRENT MCP RUNTIME ADAPTER:
 - For images, use Claude Code's structured `Read` tool.
 - For physical actions, call the real `physical_agent` MCP tools exposed by the
   runtime.
-- If an embedded guide mentions file-driver commands, action dictionaries, or
+- If a guide source mentions file-driver commands, action dictionaries, or
   legacy command files, translate the intended primitive into structured MCP
   tool calls. Preserve the guide's strategy, constraints, parameters, and
   recovery advice; only the command format is legacy.
@@ -26,18 +20,15 @@ CURRENT MCP RUNTIME ADAPTER:
   state has `libero_terminated == true`.
 """
 
-LIBERO_GUIDES = f"""
-GUIDES :
+GUIDE_READ_INSTRUCTIONS = """
+GUIDE SOURCE FILES TO READ:
+- physical_agent/envs/libero/guides/strict_hybrid_guide.md
+- physical_agent/envs/libero/guides/pro_hybrid_guide.md
+- physical_agent/envs/libero/guides/env_calibration.md
 
-## physical_agent/envs/libero/prompts/strict_hybrid_guide.py
-
-{STRICT_HYBRID_GUIDE}
-
-## physical_agent/envs/libero/prompts/pro_hybrid_guide.py
-
-{PRO_HYBRID_GUIDE}
-
-## physical_agent/envs/libero/prompts/env_calibration.py
-
-{ENV_CALIBRATION}
+At the start of each run, read all three guide source files once with Claude
+Code's structured `Read` tool before issuing the first physical command. Treat
+them as strategy and calibration references. If they mention legacy command
+examples or older command formats, use the MCP runtime adapter: keep the
+strategy, but call current runtime tools by the names shown in the tool list.
 """

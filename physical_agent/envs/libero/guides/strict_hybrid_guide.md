@@ -1,7 +1,4 @@
-"""Strict hybrid guide prompt text."""
-from __future__ import annotations
-
-STRICT_HYBRID_GUIDE = r'''# Strict Hybrid LLM + Pi0.5 — Handover Guide
+# Strict Hybrid LLM + Pi0.5 — Handover Guide
 
 You are taking over a hybrid LIBERO experiment from a previous session. This
 guide is everything you need to know to continue iterating on **strict** hybrid:
@@ -14,7 +11,7 @@ guide is everything you need to know to continue iterating on **strict** hybrid:
 ## Before you start: READ THE AUTO-MEMORY
 
 Past sessions have stored ~20 hard-won lessons in
-`logs/memory/`. The index
+`resources/libero/memory/`. The index
 file `MEMORY.md` is auto-loaded into your system prompt via CLAUDE.md,
 so the one-line hooks are already visible to you. Before launching a
 driver, **scan those hooks** for entries whose name/description touches
@@ -1111,7 +1108,7 @@ the task as a strict failure in `strategy_notes`.
 ## Memory files to read
 
 **You have access to a persistent auto-memory at**
-`logs/memory/`. The index is
+`resources/libero/memory/`. The index is
 `MEMORY.md` (one-line hooks per memory, auto-injected by CLAUDE.md into
 the system prompt of every new session). Individual entries live as
 `feedback_*.md` / `project_*.md` / `reference_*.md`.
@@ -1253,7 +1250,7 @@ Cross-suite progress + non-obvious past failures:
 11. Write exit. Move on to next task.
 12. **Memory write-back**: if you discovered a non-obvious fix or env
      quirk that took >2 iterations to diagnose, save it as
-     `logs/memory/feedback_<name>.md`
+     `resources/libero/memory/feedback_<name>.md`
      (YAML frontmatter: `name`, `description`, `type: feedback`; body
      leads with the rule, then `**Why:**` and `**How to apply:**` lines)
      AND append a one-line hook to `MEMORY.md`. Next session reads it
@@ -1264,4 +1261,4 @@ Good luck. Don't let Pi0 do the place — that's the LLM's job (Rule 1).
 For OSC singularities, reorient with `rotate_wrist`/`rotate_pitch` and
 approach from a non-singular pose; for articulation closes, push physically
 (pi0_doubled / capped OSC push). NO teleport — see Rule 4.
-**Before debugging from scratch, check memory.**'''
+**Before debugging from scratch, check memory.**

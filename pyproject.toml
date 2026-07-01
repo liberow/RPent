@@ -57,6 +57,9 @@ prerelease = "allow"
 [tool.setuptools]
 include-package-data = true
 
+[tool.setuptools.package-data]
+"physical_agent.envs.libero" = ["guides/*.md"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["physical_agent*"]
