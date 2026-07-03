@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import queue
+import shlex
 import subprocess
 import sys
 import threading
@@ -186,7 +187,7 @@ def start_vla_server(
         "--host", host,
         "--port", str(port),
     ]
-    logger.info("vla_server cmd: %s", " ".join(cmd))
+    logger.info("vla server cmd: %s", " ".join(cmd))
     if log_path:
         log_f = open(log_path, "a")
         proc = subprocess.Popen(cmd, stdout=log_f, stderr=subprocess.STDOUT, env=env)
@@ -268,20 +269,20 @@ def _build_argparser() -> argparse.ArgumentParser:
     ap.add_argument("--env", dest="env_name", default="libero",
                     help="Environment backend. Defaults to libero.")
     ap.add_argument("--model", default=None,
-                    help="Model id. Defaults to the selected backend's model env var.")
+                    help="Model id. For the 'api' cerebrum you need to prefix provider to the model id "
+                         "(e.g. anthropic:claude-opus-4-8, openai:gpt-5.5, "
+                         "openai-chat:glm-5.2).")
     ap.add_argument("--max_turns", type=int, default=100)
     ap.add_argument("--max_tokens", type=int, default=8192)
     ap.add_argument("--max_episode_steps", type=int, default=600)
     ap.add_argument("--cuda_device", default=None,
                     help="GPU device. Defaults to CUDA_DEVICE env or 0.")
     ap.add_argument("--output_dir", default=None)
-    ap.add_argument("--api_key", default=None,
-                    help="API key. Defaults to the selected backend's API key env var.")
     ap.add_argument("--base_url", default=None,
                     help="API base URL. Defaults to the selected backend's base URL env var.")
-    ap.add_argument("--cerebrum", default="anthropic",
-                    choices=["anthropic", "openai_compat", "claude_code", "codex"],
-                    help="LLM backend: anthropic | openai_compat | claude_code | codex.")
+    ap.add_argument("--cerebrum", default="api",
+                    choices=["api", "claude_code", "codex"],
+                    help="LLM backend: api | claude_code | codex.")
     ap.add_argument("--claude_code_timeout_s", type=int, default=None,
                     help="Wall-clock cap for claude -p. Defaults to CELL_TIMEOUT_S "
                          "or 1200.")
@@ -367,6 +368,7 @@ def main() -> int:
         timestamp = datetime.now().strftime("%Y%m%d-%H:%M:%S")
         output_dir = get_repo_root() / "logs" / f"{timestamp}_{suite}_t{task}_s{seed}"
     output_dir = init_output_dir(output_dir, verbose=args.verbose)
+    logger.info("physical agent cmd: %s", shlex.join([sys.executable, *sys.argv]))
 
     recipe_tag = f"{suite.replace('libero_', '')}_t{task}_s{seed}"
 
@@ -391,7 +393,6 @@ def main() -> int:
         args.cerebrum,
         output_dir=output_dir,
         recipe_tag=recipe_tag,
-        api_key=args.api_key,
         base_url=args.base_url,
         model=args.model,
         max_tokens=args.max_tokens,

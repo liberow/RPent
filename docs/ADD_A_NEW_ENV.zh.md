@@ -203,7 +203,7 @@ def user_prompt() -> dict[str, PromptNode]:
 ```
 PI05_CHECKPOINT_PATH=<path> ANTHROPIC_API_KEY=<key> \
   python -m cli.main --env myenv --suite <suite> --task <id> --seed 0 \
-  --output_dir /tmp/myenv_smoke --model claude-opus-4-7 --cerebrum anthropic
+  --output_dir /tmp/myenv_smoke --cerebrum api --model anthropic:claude-opus-4-8
 ```
 
 期望: driver 输出 `transport_ready`, agent 完成 prompt 的任务, 并调用 `finish`。

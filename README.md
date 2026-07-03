@@ -26,16 +26,18 @@ bash scripts/install_libero_pro_plus.sh
 # configure API keys
 export ANTHROPIC_BASE_URL=https://xxx
 export ANTHROPIC_API_KEY=sk-xxx
-export OPENAI_COMPAT_BASE_URL=https://xxx
-export OPENAI_COMPAT_API_KEY=sk-xxx
+export OPENAI_BASE_URL=https://xxx
+export OPENAI_API_KEY=sk-xxx
 
 export PI05_CHECKPOINT_PATH=/path/to/rlinf-pi05-libero-130-fullshot-sft # download from https://huggingface.co/datasets/RLinf/rlinf-pi05-libero-130-fullshot-sft and set path here
 export LIBERO_TYPE=pro
 export CUDA_DEVICE=0
 
-# run a test task (libero_object_swap task 2, seed 0), using an anthropic "claude-opus-4-8" model and a max token limit of 8192.
-# alternatively, you can specify openai-compatible models using --cerebrum openai_compat --model xxx.
-python cli/main.py --suite libero_object_swap --task 2 --seed 0 --cerebrum anthropic --model claude-opus-4-8 --max_tokens 8192
+# run a test task (libero_object_swap task 2, seed 0), using our own agent loop with an anthropic "claude-opus-4-8" model and a max token limit of 8192.
+# for OpenAI-compatible chat endpoints use the 'openai-chat' prefix, e.g. --model openai-chat:glm-5.2.
+# for OpenAI reponses endpoints use the 'openai' prefix, e.g. --model openai:gpt-5.5.
+# for claude code or codex cerebrums, no prefix is needed, e.g. --model claude-opus-4-8.
+python cli/main.py --suite libero_object_swap --task 2 --seed 0 --cerebrum api --model anthropic:claude-opus-4-8 --max_tokens 8192
 ```
 
 ## Documentation

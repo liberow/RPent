@@ -39,6 +39,26 @@ class _ColourFormatter(logging.Formatter):
             record.levelname = original
 
 
+class _CompactLevelFormatter(logging.Formatter):
+    """Formatter that renders the log level as a single letter (D/I/W/E/C)."""
+
+    _LEVEL_LETTERS = {
+        logging.DEBUG: "D",
+        logging.INFO: "I",
+        logging.WARNING: "W",
+        logging.ERROR: "E",
+        logging.CRITICAL: "C",
+    }
+
+    def format(self, record: logging.LogRecord) -> str:
+        original = record.levelname
+        record.levelname = self._LEVEL_LETTERS.get(record.levelno, original[:1])
+        try:
+            return super().format(record)
+        finally:
+            record.levelname = original
+
+
 class _StripPkgPrefixFilter(logging.Filter):
     """Strip the ``physical_agent.`` prefix from the logger name for display."""
 
@@ -93,8 +113,8 @@ def init_output_dir(log_dir: str | Path | None = None, verbose: bool = False) ->
     )
     file_handler.setLevel(level)
     file_handler.setFormatter(
-        logging.Formatter(
-            "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+        _CompactLevelFormatter(
+            "%(asctime)s %(levelname)s [%(name)s] %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
         )
     )
