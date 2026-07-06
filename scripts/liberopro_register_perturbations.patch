@@ -2,13 +2,14 @@ diff --git a/liberopro/liberopro/benchmark/__init__.py b/liberopro/liberopro/ben
 index 429dc50..7d961e7 100644
 --- a/liberopro/liberopro/benchmark/__init__.py
 +++ b/liberopro/liberopro/benchmark/__init__.py
-@@ -117,6 +117,24 @@ libero_suites = [
+@@ -117,6 +117,25 @@ libero_suites = [
  "libero_spatial_temp",
  "libero_10_temp",
  "libero_object_temp",
 +# LIBERO-Pro perturbation variants (zhangyixian 2026-05-20).
 +# swap=P2 Position, task=P1 Task, lan=Semantic, object=Object.
-+# libero_spatial has no swap (P2 makes no sense for spatial-relation tasks).
++# Includes all base/perturbation combinations provided by the HF assets.
++"libero_spatial_swap",
 +"libero_spatial_task",
 +"libero_spatial_lan",
 +"libero_spatial_object",
@@ -86,7 +87,7 @@ index 429dc50..7d961e7 100644
 +    return cls
 +
 +for _suite in [
-+    "libero_spatial_task", "libero_spatial_lan", "libero_spatial_object",
++    "libero_spatial_swap", "libero_spatial_task", "libero_spatial_lan", "libero_spatial_object",
 +    "libero_object_swap", "libero_object_task", "libero_object_lan", "libero_object_object",
 +    "libero_goal_swap", "libero_goal_task", "libero_goal_lan", "libero_goal_object",
 +    "libero_10_swap", "libero_10_task", "libero_10_lan", "libero_10_object",
@@ -97,7 +98,7 @@ diff --git a/liberopro/liberopro/benchmark/libero_suite_task_map.py b/liberopro/
 index bfd0a62..9b22f8b 100644
 --- a/liberopro/liberopro/benchmark/libero_suite_task_map.py
 +++ b/liberopro/liberopro/benchmark/libero_suite_task_map.py
-@@ -1148,4 +1148,19 @@ libero_task_map = {
+@@ -1148,4 +1148,16 @@ libero_task_map = {
          "pick_up_the_orange_juice_and_place_it_in_the_basket",
      ],
  
@@ -113,10 +114,7 @@ index bfd0a62..9b22f8b 100644
 +#   task   - P1 Task Perturbation (instruction + goal predicate changed)
 +#   lan    - Semantic Perturbation (paraphrased instruction, same goal)
 +#   object - Object Perturbation (appearance/colour/scale changes)
-+# libero_spatial has no swap variant (P2 makes no sense for spatial tasks).
 +for _base in ["libero_spatial", "libero_object", "libero_goal", "libero_10"]:
 +    for _perturb in ["swap", "task", "lan", "object"]:
-+        if _base == "libero_spatial" and _perturb == "swap":
-+            continue
 +        libero_task_map[f"{_base}_{_perturb}"] = libero_task_map[_base]
 \ No newline at end of file

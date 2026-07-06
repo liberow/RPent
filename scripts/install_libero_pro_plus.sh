@@ -199,54 +199,72 @@ install_libero_pro() {
     fi
 
     if [ ! -f "$PATCH_FILE" ]; then
-        echo "[pro] WARN: patch file missing: $PATCH_FILE"
-    else
-        pushd "$LIBERO_PRO_PATH" >/dev/null
-        if git apply --check "$PATCH_FILE" 2>/dev/null; then
-            echo "[pro] applying perturbation registration patch"
-            git apply "$PATCH_FILE"
-        elif git apply --reverse --check "$PATCH_FILE" 2>/dev/null; then
-            echo "[pro] patch already applied"
-        else
-            echo "[pro] WARN: patch applies neither forward nor reverse; inspect $PATCH_FILE"
-        fi
-        popd >/dev/null
+        echo "[pro] patch file missing: $PATCH_FILE" >&2
+        return 1
     fi
+
+    pushd "$LIBERO_PRO_PATH" >/dev/null
+    if git apply --check "$PATCH_FILE" 2>/dev/null; then
+        git apply "$PATCH_FILE"
+        echo "[pro] applied patch: $PATCH_FILE"
+    elif git apply --reverse --check "$PATCH_FILE" 2>/dev/null; then
+        echo "[pro] patch already applied: $PATCH_FILE"
+    else
+        echo "[pro] patch applies neither forward nor reverse; use a clean LIBERO-PRO checkout or repair the existing install manually" >&2
+        popd >/dev/null
+        return 1
+    fi
+    popd >/dev/null
 
     local dest="$LIBERO_PRO_PATH/liberopro/liberopro"
     write_libero_config pro "$LIBERO_PRO_CONFIG_PATH" "$dest"
 
-    if [ -d "$LIBERO_PRO_HF_DIR" ]; then
-        sync_dir "$LIBERO_PRO_HF_DIR/bddl_files" "$dest/bddl_files" "*.bddl"
-        sync_dir "$LIBERO_PRO_HF_DIR/init_files" "$dest/init_files" "*.pruned_init"
-    else
-        echo "[pro] HF snapshot dir missing: $LIBERO_PRO_HF_DIR"
-        echo "[pro] continuing with assets already present in $dest"
-        cat <<EOF
-[pro] To refresh perturbation assets, run:
-python - <<'PY'
+    if ! python_clean -c "import huggingface_hub" >/dev/null 2>&1; then
+        echo "[pro] installing Python package: huggingface_hub"
+        "${PIP[@]}" install huggingface_hub
+    fi
+    echo "[pro] downloading HF perturbation assets to $LIBERO_PRO_HF_DIR"
+    python_clean - "$LIBERO_PRO_HF_DIR" <<'PY'
+from pathlib import Path
+import sys
+
 from huggingface_hub import snapshot_download
+
+local_dir = Path(sys.argv[1]).expanduser()
 snapshot_download(
-    repo_id='zhouxueyang/LIBERO-Pro', repo_type='dataset',
-    local_dir='$LIBERO_PRO_HF_DIR',
-    allow_patterns=['bddl_files/**', 'init_files/**'],
+    repo_id="zhouxueyang/LIBERO-Pro",
+    repo_type="dataset",
+    local_dir=str(local_dir),
+    allow_patterns=["bddl_files/**", "init_files/**"],
 )
 PY
-EOF
-    fi
+    local pro_perturbation_suites=(
+        "libero_spatial_task" "libero_spatial_swap" "libero_spatial_lan"
+        "libero_10_task" "libero_10_swap" "libero_10_lan"
+        "libero_goal_task" "libero_goal_swap" "libero_goal_lan"
+        "libero_object_task" "libero_object_swap" "libero_object_lan"
+    )
+    local suite_name
+    for suite_name in "${pro_perturbation_suites[@]}"; do
+        if ! compgen -G "$LIBERO_PRO_HF_DIR/bddl_files/$suite_name/*.bddl" >/dev/null; then
+            echo "[pro] downloaded HF snapshot but missing bddl_files/$suite_name/*.bddl" >&2
+            return 1
+        fi
+        if ! compgen -G "$LIBERO_PRO_HF_DIR/init_files/$suite_name/*.pruned_init" >/dev/null; then
+            echo "[pro] downloaded HF snapshot but missing init_files/$suite_name/*.pruned_init" >&2
+            return 1
+        fi
+    done
+    sync_dir "$LIBERO_PRO_HF_DIR/bddl_files" "$dest/bddl_files" "*.bddl"
+    sync_dir "$LIBERO_PRO_HF_DIR/init_files" "$dest/init_files" "*.pruned_init"
 
-    PYTHONNOUSERSITE=1 PYTHONPATH= LIBERO_CONFIG_PATH="$LIBERO_PRO_CONFIG_PATH" LIBERO_TYPE=pro "$PYTHON" - <<'PY'
+    PYTHONNOUSERSITE=1 PYTHONPATH= LIBERO_CONFIG_PATH="$LIBERO_PRO_CONFIG_PATH" LIBERO_TYPE=pro "$PYTHON" - "${pro_perturbation_suites[@]}" <<'PY'
 import os
+import sys
 os.environ.setdefault("LIBERO_TYPE", "pro")
 import liberopro.liberopro.benchmark as bench
 
-suites = [
-    "libero_spatial_task", "libero_spatial_swap", "libero_spatial_lan",
-    "libero_10_task", "libero_10_swap", "libero_10_lan",
-    "libero_goal_task", "libero_goal_swap", "libero_goal_lan",
-    "libero_object_task", "libero_object_swap", "libero_object_lan",
-]
-known_empty = {"libero_spatial_swap"}
+suites = sys.argv[1:]
 bad = []
 for suite_name in suites:
     try:
@@ -255,15 +273,14 @@ for suite_name in suites:
         language = suite.get_task(0).language[:60]
         status = "OK" if ntrials > 0 else "EMPTY_INIT"
         print(f"  {suite_name:25s} t0 trials={ntrials:>3}  {language!r}  [{status}]")
-        if ntrials == 0 and suite_name not in known_empty:
+        if ntrials == 0:
             bad.append(suite_name)
     except Exception as exc:
         print(f"  {suite_name:25s} ERROR {type(exc).__name__}: {exc}")
-        if suite_name not in known_empty:
-            bad.append(suite_name)
+        bad.append(suite_name)
 if bad:
-    raise SystemExit(f"[verify] broken suites, excluding known-empty: {bad}")
-print(f"[verify] all probed suites are usable; skipped known-empty: {sorted(known_empty)}")
+    raise SystemExit(f"[verify] broken suites: {bad}")
+print("[verify] all probed suites are usable")
 PY
     echo "[pro] OK"
 }
