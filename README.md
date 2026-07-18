@@ -41,8 +41,8 @@ RPent is built upon three core design principles: Service-oriented, Standardized
     <tr>
       <th width="26%">Agentic Planner</th>
       <th width="28%">Action Primitives</th>
-      <th width="24%" align="left">Simulator</th>
-      <th width="22%">Real World</th>
+      <th width="26%" align="left">Simulator</th>
+      <th width="20%">Real World</th>
     </tr>
   </thead>
   <tbody valign="top">
